@@ -1,6 +1,6 @@
 // Agent tools on GLB documents. Pure functions of (doc, args); storage and transport live in worker.js / mcp.js.
 import { bindDoc, readSkeleton } from './glb.js';
-import { evalWorld, gatherAll, posedPositions, weightInfo, skeletonLines, sampleAnim, animDuration, eulerDeg, qmul, mul } from './scene.js';
+import { evalWorld, gatherAll, posedPositions, weightInfo, skeletonLines, sampleAnim, animDuration, eulerDeg, qmul, mul, slerp, jointRot, jointMove } from './scene.js';
 import { renderTiles, encodePNG, palette, heat, fitFrame } from './render.js';
 import { build, toDocument, applyPatch, storedModel, normalizeModel } from './sdf.js';
 
@@ -24,7 +24,7 @@ function poseMap(doc, pose) {
   const J = jointByName(doc), m = new Map();
   for (const [b, e] of Object.entries(pose)) {
     const n = J.get(b); if (!n) throw new Error(`pose: no bone ${b}`);
-    m.set(n, eulerDeg(...e));
+    m.set(n, jointRot(n, eulerDeg(...e)));
   }
   return m;
 }
@@ -235,22 +235,45 @@ export function animate(doc, a) {
     const T = new Float32Array(keys.map((k) => k.t));
     const rest = n.getRotation(), rt = n.getTranslation();
     if (keys.some((k) => k.rot)) {
-      const R = new Float32Array(keys.length * 4); let prev = null;
-      keys.forEach((k, i) => {
-        let q = qmul(rest, eulerDeg(...(k.rot ?? [0, 0, 0])));
+      const qs = []; let prev = null;
+      for (const k of keys) {
+        let q = qmul(rest, jointRot(n, eulerDeg(...(k.rot ?? [0, 0, 0]))));
         if (prev && q[0] * prev[0] + q[1] * prev[1] + q[2] * prev[2] + q[3] * prev[3] < 0) q = q.map((v) => -v);
-        R.set(q, i * 4); prev = q;
-      });
-      const s = doc.createAnimationSampler().setInput(doc.createAccessor().setArray(T).setType('SCALAR').setBuffer(buf))
+        qs.push(q); prev = q;
+      }
+      // glTF LINEAR rotations are slerped, but Blender (and some engines) blend quaternion components linearly between
+      // keys, which drifts on big turns. Extra keys on the same slerp path every 20 degrees or less keep them all equal.
+      const tq = [keys[0].t], oq = [qs[0]];
+      for (let i = 1; i < keys.length; i++) {
+        const d = Math.min(1, Math.abs(qs[i - 1].reduce((s, v, c) => s + v * qs[i][c], 0)));
+        const steps = (a.interpolation ?? 'LINEAR') === 'LINEAR' ? Math.max(1, Math.ceil((2 * Math.acos(d) * 180 / Math.PI) / 20)) : 1;
+        for (let j = 1; j <= steps; j++) {
+          tq.push(keys[i - 1].t + (keys[i].t - keys[i - 1].t) * j / steps);
+          oq.push(j === steps ? qs[i] : slerp(qs[i - 1], qs[i], j / steps));
+        }
+      }
+      const R = new Float32Array(oq.flat()), TR = new Float32Array(tq);
+      const s = doc.createAnimationSampler().setInput(doc.createAccessor().setArray(TR).setType('SCALAR').setBuffer(buf))
         .setOutput(doc.createAccessor().setArray(R).setType('VEC4').setBuffer(buf)).setInterpolation(a.interpolation ?? 'LINEAR');
       anim.addSampler(s).addChannel(doc.createAnimationChannel().setTargetNode(n).setTargetPath('rotation').setSampler(s));
     }
     if (keys.some((k) => k.move)) {
       const P = new Float32Array(keys.length * 3);
-      keys.forEach((k, i) => { const m = k.move ?? [0, 0, 0]; P.set([rt[0] + m[0], rt[1] + m[1], rt[2] + m[2]], i * 3); });
+      keys.forEach((k, i) => { const m = jointMove(n, k.move ?? [0, 0, 0]); P.set([rt[0] + m[0], rt[1] + m[1], rt[2] + m[2]], i * 3); });
       const s = doc.createAnimationSampler().setInput(doc.createAccessor().setArray(T).setType('SCALAR').setBuffer(buf))
         .setOutput(doc.createAccessor().setArray(P).setType('VEC3').setBuffer(buf)).setInterpolation(a.interpolation ?? 'LINEAR');
       anim.addSampler(s).addChannel(doc.createAnimationChannel().setTargetNode(n).setTargetPath('translation').setSampler(s));
+    }
+  }
+  // Every joint gets a channel for rotation and translation, holding rest where the clip does not move it. glTF says
+  // untouched joints sit at rest, but Blender (and engines that blend clips) leave them wherever the last clip put them.
+  if (a.holdRest !== false && dur > 0) {
+    const keyed = new Set(anim.listChannels().map((c) => `${c.getTargetNode().getName()}|${c.getTargetPath()}`));
+    const T2 = doc.createAccessor().setArray(new Float32Array([0, dur])).setType('SCALAR').setBuffer(buf);
+    for (const n of new Set(J.values())) for (const [path, v, type] of [['rotation', n.getRotation(), 'VEC4'], ['translation', n.getTranslation(), 'VEC3']]) {
+      if (keyed.has(`${n.getName()}|${path}`)) continue;
+      const s = doc.createAnimationSampler().setInput(T2).setOutput(doc.createAccessor().setArray(new Float32Array([...v, ...v])).setType(type).setBuffer(buf)).setInterpolation('LINEAR');
+      anim.addSampler(s).addChannel(doc.createAnimationChannel().setTargetNode(n).setTargetPath(path).setSampler(s));
     }
   }
   return { animation: a.name, duration: r4(dur), channels: anim.listChannels().length, loop };

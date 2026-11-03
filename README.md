@@ -74,9 +74,24 @@ npm test                         # model -> bind -> paint -> animate -> qa in No
 | `src/render.js` | software rasterizer for previews |
 | `src/glb.js` | glTF read/write via [glTF Transform](https://gltf-transform.dev) |
 
-**Conventions.** Coordinates are glTF metres: +Y up, +Z front, +X the character's left. Rotations are Euler degrees applied X, then Y, then Z. The [docs](https://epinnock.github.io/rig-worker/) have every shape, field and tool.
+**Conventions.** Coordinates are glTF metres: +Y up, +Z front, +X the character's left. Rotations are Euler degrees applied X, then Y, then Z, about world axes through the joint for bones `bind` made (rigs from other tools turn about their own bone axes). The [docs](https://epinnock.github.io/rig-worker/) have every shape, field and tool.
 
-**Known gaps.** There is no smoothing operation for weights and no undo for paints. `qa` does not separate stretched edges from squashed ones. Rebuilding a model drops its rig, so you bind again. Meshes carry vertex colours only. Skinning is linear blend with 4 influences.
+**Known gaps.** There is no smoothing operation for weights and no undo for paints. `qa` does not separate stretched edges from squashed ones. Rebuilding a model drops its rig, so you bind again. `model` makes vertex colours only, no UVs or textures (meshes you bring keep theirs). Skinning is linear blend with 4 influences.
+
+## Blender
+
+Every GLB rig-worker writes opens in Blender with the default glTF import settings and needs no clean-up (tested with Blender 4.5):
+
+- The rest shape, vertex colours (wired into the material), weights (one vertex group per bone) and every clip (one action each) match rig-worker's own numbers. The deformed mesh is within 0.05 mm at eight sample times per clip, in Blender 4.5.
+- Bones point along the limbs, head to tail, as in a rig made in Blender.
+- Meshes and rigs you bring from Blender keep their UVs, textures, bone rolls and actions.
+- Blender's re-export reads back into rig-worker the same.
+
+The test that checks all of this is in `test/blender`:
+
+```sh
+BLENDER=/path/to/blender npm run test:blender   # ~30 s; reports in work/blender
+```
 
 ## License
 

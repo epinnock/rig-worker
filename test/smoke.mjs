@@ -44,7 +44,7 @@ const doc = await step('model at res 0.01 + round trip', async () => readGLB(awa
 const bind = await step('bind', () => T.bind(doc, { skeleton: ex('skeleton.json') }));
 assert.equal(bind.createdSkin, true); assert.deepEqual(bind.bonesOwningNoVertex, []);
 await step('paint_weights', () => { for (const p of ex('paint.json')) assert.ok(T.paintWeights(doc, p).verticesChanged > 0); });
-await step('animate', () => assert.equal(T.animate(doc, ex('walk.json')).channels, 15));
+await step('animate', () => assert.equal(T.animate(doc, ex('walk.json')).channels, 28)); // 14 bones x (rotation + translation): walk keys 14 rotations + the hips move, the rest hold rest
 const qa = await step('qa', () => T.qa(doc, { animation: 'walk', frames: 16 }));
 assert.equal(qa.summary.framesSinkingBelowGround, 0, JSON.stringify(qa.summary));
 const pv = await step('preview', () => T.preview(doc, { frames: 4, views: [90], res: 128 }));

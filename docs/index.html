@@ -144,7 +144,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: 
   <div class="wrap">
     <a class="brand" href="#"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="11" r="8" fill="#f2b134"/><path d="M16 19v8M16 23l-6 5M16 23l6 5" stroke="#2a9d8f" stroke-width="3" stroke-linecap="round" fill="none"/></svg>rig-worker</a>
     <nav>
-      <a href="#connect">Connect</a><a href="#pipeline">Pipeline</a><a href="#playground">Playground</a><a href="#tools">Tools</a><a href="#modelling">Modelling</a><a href="#rigging">Rigging</a><a href="#self-host">Self-host</a>
+      <a href="#connect">Connect</a><a href="#pipeline">Pipeline</a><a href="#playground">Playground</a><a href="#tools">Tools</a><a href="#modelling">Modelling</a><a href="#rigging">Rigging</a><a href="#self-host">Self-host</a><a href="#blender">Blender</a>
       <a href="https://github.com/epinnock/rig-worker">GitHub</a>
     </nav>
     <button class="theme" id="theme" aria-label="Switch light or dark theme" title="Light / dark">◐</button>
@@ -316,7 +316,7 @@ node examples/pip/run.mjs            <span class="c"># model -> bind -> walk -> 
     <h3>Conventions</h3>
     <ul class="tight">
       <li><b>Space:</b> glTF metres, <b>+Y up, +Z front, +X the character's left</b>. Stand characters on <code>y = 0</code> facing +Z.</li>
-      <li><b>Rotations:</b> Euler degrees <code>[x, y, z]</code>, applied X, then Y, then Z, about the joint's rest axes, which <code>bind</code> makes world-aligned. +X swings a leg back, +Y turns toward the character's left, +Z raises the left arm.</li>
+      <li><b>Rotations:</b> Euler degrees <code>[x, y, z]</code>, applied X, then Y, then Z, about the world axes through the joint for bones <code>bind</code> made (+X swings a leg back, +Y turns toward the character's left, +Z raises the left arm), and about the joint's own rest axes for rigs made elsewhere. The bones themselves are stored pointing along the limb, as Blender expects.</li>
       <li><b>Views:</b> azimuth degrees, 0 = front, 90 = the character's left side. The default camera frames the rest-pose bounds and stays the same between calls, so pictures compare.</li>
     </ul>
   </div>
@@ -447,6 +447,28 @@ RIG_TOKEN=... node examples/pip/run.mjs http://127.0.0.1:8799</code></pre>
   </div>
 </section>
 
+<section id="blender">
+  <div class="wrap">
+    <div class="kicker">Blender</div>
+    <h2>Opens in Blender as it looks here</h2>
+    <p>Every GLB rig-worker writes imports into Blender (tested with 4.5) with the default glTF settings and no clean-up, and Blender's own export comes back the same. A test in the repo checks this end to end: Blender builds a textured mesh and a rig of its own, rig-worker models, binds, paints and animates, Blender imports each result and compares it with rig-worker's numbers, then re-exports it for rig-worker to read back.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Checked in Blender 4.5</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Shape at rest</td><td>same vertices in the same order, within 0.0003 mm</td></tr>
+        <tr><td>Vertex colours</td><td>a colour attribute wired into the material, within 8-bit rounding</td></tr>
+        <tr><td>UVs and image textures on meshes you bring</td><td>kept through <code>bind</code> and <code>animate</code></td></tr>
+        <tr><td>Bones</td><td>same names and parents; each bone points from its head to its tail, so arms and legs point along the limbs, as in a rig made in Blender</td></tr>
+        <tr><td>Weights</td><td>one vertex group per bone, same values</td></tr>
+        <tr><td>Clips</td><td>one action per clip; the deformed mesh matches within 0.05 mm at eight times per clip, for linear, stepped and root-motion clips, and after switching from another clip</td></tr>
+        <tr><td>Rigs made in Blender</td><td>re-weighted in place with their own bone axes, rolls and actions kept</td></tr>
+        <tr><td>Blender's re-export</td><td>reads back into rig-worker with the same shape, weights and motion, and binds and animates again</td></tr>
+      </tbody>
+    </table></div>
+    <p>Run it with <code>BLENDER=/path/to/blender npm run test:blender</code> (about 30 s). Two things in the files exist for Blender's sake: <code>animate</code> keys every bone in every clip (bones a clip leaves alone hold their rest pose, because Blender otherwise keeps them where the last clip put them), and it adds keys every 20° on big turns, because Blender blends quaternion keys linearly where glTF asks for a slerp.</p>
+  </div>
+</section>
+
 <section id="numbers">
   <div class="wrap">
     <div class="kicker">Measured</div>
@@ -468,7 +490,7 @@ RIG_TOKEN=... node examples/pip/run.mjs http://127.0.0.1:8799</code></pre>
       <li>No smoothing or removing of weights as an operation, and no undo for <code>paint_weights</code> (use <code>out</code> to keep versions).</li>
       <li><code>qa</code> flags edges by length ratio and does not yet say stretched or squashed; tiny surface-net edges near creases can show high ratios.</li>
       <li>Rebuilding a model with a patch gives an unrigged mesh: bind it again (the skeleton JSON is reusable).</li>
-      <li>Vertex colours only, no textures or UVs; linear blend skinning with 4 influences.</li>
+      <li><code>model</code> makes vertex colours only, no UVs or textures (meshes you bring keep theirs); linear blend skinning with 4 influences.</li>
     </ul>
   </div>
 </section>

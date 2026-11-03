@@ -2,6 +2,7 @@
 import { WebIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { bindHeat } from './heat.js';
+import { mul, invert, qmul, qconj, qrot, boneFrame } from './scene.js';
 
 const io = () => new WebIO().registerExtensions(ALL_EXTENSIONS);
 
@@ -87,8 +88,10 @@ export function bindDoc(doc, skeleton, opt = {}) {
   return { stats: { ...res.stats, createdSkin: !!created }, before, joints: res.joints, weights: res.weights, pos };
 }
 
-// Joints are world-axis aligned in rest (identity rotation), translated to each bone head. A pose rotation of
-// [x, y, z] degrees on a joint therefore turns about the world X/Y/Z axes through the joint, which is easy to reason about.
+// Each joint's rest frame has +Y along its bone (head -> tail), so Blender and other tools show bones pointing along
+// the limbs; translations are bone heads in the parent's frame. The joints are marked extras.axes = "world" and the
+// tools turn pose rotations of [x, y, z] degrees into turns about the world X/Y/Z axes through the joint, which is
+// easier for an agent to reason about (scene.js jointRot/jointMove).
 export function createSkin(doc, skeleton) {
   const root = doc.getRoot(), scene = root.getDefaultScene() ?? root.listScenes()[0] ?? doc.createScene('Scene');
   if (!root.getDefaultScene()) root.setDefaultScene(scene);
@@ -102,10 +105,13 @@ export function createSkin(doc, skeleton) {
   const arm = doc.createNode('Armature');
   scene.addChild(arm);
   const nodes = new Map(bones.map((b) => [b.name, doc.createNode(b.name)]));
+  const frame = new Map(bones.map((b) => [b.name, boneFrame(b.head, b.tail)]));
   for (const b of bones) {
     const n = nodes.get(b.name), ph = b.parent ? byName.get(b.parent).head : [0, 0, 0];
-    n.setTranslation([b.head[0] - ph[0], b.head[1] - ph[1], b.head[2] - ph[2]]);
-    n.setExtras({ tail: b.tail, ...(b.falloff ? { falloff: b.falloff } : {}) });
+    const Rp = b.parent ? frame.get(b.parent) : [0, 0, 0, 1], Ri = qconj(Rp);
+    n.setTranslation(qrot(Ri, [b.head[0] - ph[0], b.head[1] - ph[1], b.head[2] - ph[2]]));
+    n.setRotation(qmul(Ri, frame.get(b.name)));
+    n.setExtras({ tail: b.tail, axes: 'world', ...(b.falloff ? { falloff: b.falloff } : {}) });
     (b.parent ? nodes.get(b.parent) : arm).addChild(n);
   }
   const skin = doc.createSkin('Armature');
@@ -115,10 +121,7 @@ export function createSkin(doc, skeleton) {
   // IBM_j = inverse(jointWorld_j) * meshWorld; meshes are expected to share one world transform (TRELLIS/Meshy: identity)
   const M = meshNodes[0].getWorldMatrix();
   const ibm = new Float32Array(bones.length * 16);
-  bones.forEach((b, j) => {
-    const T = [...M]; T[12] -= b.head[0]; T[13] -= b.head[1]; T[14] -= b.head[2];
-    ibm.set(T, j * 16);
-  });
+  bones.forEach((b, j) => ibm.set(mul(invert(nodes.get(b.name).getWorldMatrix()), M), j * 16));
   skin.setInverseBindMatrices(doc.createAccessor('IBM').setType('MAT4').setArray(ibm).setBuffer(buf));
   for (const n of meshNodes) n.setSkin(skin);
   return skin;

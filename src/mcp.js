@@ -34,7 +34,7 @@ const skeletonSchema = {
     },
   },
 };
-const ROT_DOC = 'Euler degrees [x, y, z], applied X first, then Y, then Z, about the joint\'s rest axes (bind makes them world-aligned: +X character\'s left, +Y up, +Z front), right-hand rule. Examples: +X swings a leg back (-X forward); +Y turns toward the character\'s left; +Z raises the left arm (lowers the right one).';
+const ROT_DOC = 'Euler degrees [x, y, z], applied X first, then Y, then Z, about world axes through the joint for bones made by bind (+X character\'s left, +Y up, +Z front), or about the joint\'s own rest axes for rigs made in other tools; right-hand rule. Examples: +X swings a leg back (-X forward); +Y turns toward the character\'s left; +Z raises the left arm (lowers the right one).';
 const poseSchema = { type: 'object', description: `{boneName: [x, y, z]} on top of rest/animation. ${ROT_DOC}`, additionalProperties: vec3 };
 
 export const TOOLS = [
@@ -86,6 +86,7 @@ export const TOOLS = [
       type: 'object', required: ['file', 'name', 'tracks'], properties: {
         file, out, name: { type: 'string' }, duration: { type: 'number', description: 'seconds; with loop the first key is repeated at duration' },
         loop: { type: 'boolean', description: 'default true' }, interpolation: { enum: ['LINEAR', 'STEP'] },
+        holdRest: { type: 'boolean', description: 'default true: bones the clip does not key are keyed at rest, so switching clips in Blender or a game engine never leaves them in the last clip\'s pose' },
         tracks: { type: 'array', items: { type: 'object', required: ['bone', 'keys'], properties: { bone: { type: 'string' }, keys: { type: 'array', items: { type: 'object', required: ['t'], properties: { t: { type: 'number' }, rot: vec3, move: vec3 } } } } } },
       },
     },
@@ -225,7 +226,7 @@ export async function handleMcp(req, env, cx = { ns: '', demo: false }) {
           return ok(m.id, {
             protocolVersion: m.params?.protocolVersion === '2025-03-26' ? '2025-03-26' : PROTOCOL,
             capabilities: { tools: {} },
-            serverInfo: { name: 'rig-worker', version: '0.3.0' },
+            serverInfo: { name: 'rig-worker', version: '0.4.0' },
             instructions: (cx.demo ? 'Public demo: no token, small limits, files are private to your IP and deleted after a day. ' : '') + 'Headless modelling and rigging. To make a character: model (shapes -> closed mesh, patch to refine). Rigging loop: inspect -> preview with a proposed skeleton -> bind -> preview mode weights -> animate -> preview frames + qa -> paint_weights fixes -> export. Coordinates are glTF (+Y up, +Z front, +X the character\'s left), metres.',
           });
         case 'ping': return ok(m.id, {});
