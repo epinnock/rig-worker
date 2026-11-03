@@ -1,0 +1,27 @@
+{
+  "name": "rig-worker",
+  "version": "0.3.0",
+  "description": "Headless 3D modelling and rigging for AI agents: an MCP server in one Cloudflare Worker (SDF modelling, bone-heat skinning, keyframe animation, previews, QA).",
+  "license": "MIT",
+  "author": "Ejiro Pinnock",
+  "type": "module",
+  "homepage": "https://epinnock.github.io/rig-worker/",
+  "repository": { "type": "git", "url": "git+https://github.com/epinnock/rig-worker.git" },
+  "bugs": { "url": "https://github.com/epinnock/rig-worker/issues" },
+  "keywords": ["mcp", "cloudflare-workers", "rigging", "skinning", "gltf", "sdf", "3d", "agents", "animation"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "wrangler dev --port 8799",
+    "deploy": "wrangler deploy",
+    "deploy:demo": "wrangler deploy --env demo",
+    "test": "node test/smoke.mjs",
+    "example": "node examples/pip/run.mjs"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.1.0",
+    "@gltf-transform/extensions": "^4.1.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.69.0"
+  }
+}

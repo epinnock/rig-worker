@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rig-worker: headless 3D modelling and rigging for agents</title>
+<meta name="description" content="An MCP server in one Cloudflare Worker that lets AI agents model, rig, animate and check 3D characters: signed-distance modelling, bone-heat skinning, keyframes, previews and QA, in pure JavaScript.">
+<meta property="og:title" content="rig-worker">
+<meta property="og:description" content="Headless 3D modelling and rigging for AI agents, in one Cloudflare Worker.">
+<meta property="og:image" content="https://epinnock.github.io/rig-worker/img/hero.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='12' r='8' fill='%23f2b134'/%3E%3Cpath d='M16 20v9M16 24l-6 5M16 24l6 5' stroke='%232a9d8f' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
+<style>
+:root {
+  --mustard: #f2b134; --teal: #2a9d8f; --rust: #c4553a; --navy: #2e3a59; --cream: #f4ecd8;
+  --bg: #f7f2e7; --bg2: #efe7d6; --card: #fffdf8; --ink: #1d1f26; --ink2: #4a4f5c; --ink3: #7a7f8c;
+  --line: #e2d8c4; --code-bg: #1d2029; --code-ink: #e8e4da; --accent: #b0571f; --accent-bg: #f8e2c4;
+  --stage: #2f323d; --shadow: 0 1px 2px rgb(40 30 10 / .06), 0 8px 24px rgb(40 30 10 / .07);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #13151b; --bg2: #191c24; --card: #1c1f28; --ink: #ece7dc; --ink2: #b3b0a8; --ink3: #82808a;
+    --line: #2b2f3a; --code-bg: #0e1015; --code-ink: #e8e4da; --accent: #f2b134; --accent-bg: #3a2f17;
+    --stage: #262a34; --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 8px 24px rgb(0 0 0 / .25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #13151b; --bg2: #191c24; --card: #1c1f28; --ink: #ece7dc; --ink2: #b3b0a8; --ink3: #82808a;
+  --line: #2b2f3a; --code-bg: #0e1015; --code-ink: #e8e4da; --accent: #f2b134; --accent-bg: #3a2f17;
+  --stage: #262a34; --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 8px 24px rgb(0 0 0 / .25);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 "IBM Plex Sans", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+a { color: var(--accent); text-underline-offset: 3px; }
+h1, h2, h3 { font-family: "Bricolage Grotesque", system-ui, sans-serif; line-height: 1.12; letter-spacing: -0.015em; margin: 0; }
+h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; margin-bottom: 14px; }
+h3 { font-size: 21px; font-weight: 700; margin: 34px 0 10px; }
+p { margin: 0 0 14px; }
+code, pre, kbd { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.88em; }
+:not(pre) > code { background: var(--bg2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); color: var(--code-ink); border-radius: 12px; padding: 16px 64px 16px 18px; overflow-x: auto; line-height: 1.55; margin: 0 0 18px; font-size: 13.5px; position: relative; }
+pre .c { color: #8b8f9c; } pre .k { color: #f2b134; } pre .s { color: #8fd4c9; } pre .n { color: #f29e8e; }
+.copy { position: absolute; top: 8px; right: 8px; background: #2b2f3a; color: #cfcabf; border: 0; border-radius: 7px; font: 500 12px "IBM Plex Sans"; padding: 4px 9px; cursor: pointer; opacity: .8; }
+.copy:hover { opacity: 1; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+@media (max-width: 600px) { .wrap { padding: 0 16px; } }
+
+/* top bar */
+.top { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.top .wrap { display: flex; align-items: center; gap: 22px; height: 58px; }
+.brand { display: flex; align-items: center; gap: 9px; font: 800 19px "Bricolage Grotesque"; color: var(--ink); text-decoration: none; }
+.brand svg { width: 26px; height: 26px; }
+.top nav { display: flex; gap: 18px; margin-left: auto; font-size: 14.5px; }
+.top nav a { color: var(--ink2); text-decoration: none; }
+.top nav a:hover { color: var(--ink); }
+.theme { background: none; border: 1px solid var(--line); color: var(--ink2); border-radius: 8px; width: 34px; height: 32px; cursor: pointer; font-size: 15px; }
+@media (max-width: 820px) { .top nav { display: none; } .theme { margin-left: auto; } }
+
+/* hero */
+.hero { padding: 64px 0 40px; }
+.hero .wrap { display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; }
+@media (max-width: 900px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 28px; } .hero { padding-top: 36px; } }
+.eyebrow { display: inline-flex; gap: 8px; align-items: center; font: 600 13px "IBM Plex Sans"; color: var(--ink2); background: var(--card); border: 1px solid var(--line); border-radius: 99px; padding: 4px 12px 4px 6px; margin-bottom: 20px; }
+.eyebrow b { background: var(--teal); color: #fff; border-radius: 99px; padding: 1px 8px; font-weight: 600; }
+.hero h1 { font-size: clamp(40px, 6.2vw, 68px); font-weight: 800; margin-bottom: 20px; }
+.hero h1 em { font-style: normal; background: linear-gradient(transparent 62%, color-mix(in srgb, var(--mustard) 55%, transparent) 62%); }
+.lede { font-size: 19px; color: var(--ink2); max-width: 34em; margin-bottom: 26px; }
+.ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 11px; font: 600 15px "IBM Plex Sans"; text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: var(--card); box-shadow: var(--shadow); }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn:hover { transform: translateY(-1px); }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 22px; color: var(--ink3); font-size: 14px; }
+.facts span::before { content: "●"; color: var(--teal); margin-right: 7px; font-size: 10px; vertical-align: 2px; }
+.stage { position: relative; aspect-ratio: 1 / 1; border-radius: 22px; background: radial-gradient(120% 90% at 50% 20%, #3b3f4c, var(--stage) 70%); box-shadow: var(--shadow); overflow: hidden; border: 1px solid var(--line); }
+.stage model-viewer { width: 100%; height: 100%; --poster-color: transparent; }
+.stage img.poster { width: 100%; height: 100%; object-fit: cover; }
+.stage .tag { position: absolute; left: 14px; bottom: 12px; font: 500 12.5px "IBM Plex Mono"; color: #d9d4c8; background: rgb(0 0 0 / .35); padding: 5px 10px; border-radius: 8px; }
+.stage .tag2 { position: absolute; right: 14px; top: 12px; font: 600 12px "IBM Plex Sans"; color: #1d1f26; background: var(--mustard); padding: 4px 10px; border-radius: 99px; }
+
+section { padding: 56px 0; border-top: 1px solid var(--line); }
+.kicker { font: 600 13px "IBM Plex Sans"; letter-spacing: .08em; text-transform: uppercase; color: var(--teal); margin-bottom: 10px; }
+.intro { font-size: 17.5px; color: var(--ink2); max-width: 46em; margin-bottom: 26px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+@media (max-width: 860px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; box-shadow: var(--shadow); min-width: 0; }
+.card h3 { margin-top: 0; }
+.card p:last-child, .card pre:last-child { margin-bottom: 0; }
+
+/* steps */
+.steps { display: grid; gap: 22px; counter-reset: s; }
+.step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 26px; align-items: start; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 24px; box-shadow: var(--shadow); }
+@media (max-width: 860px) { .step { grid-template-columns: minmax(0, 1fr); padding: 18px; } }
+.step h3 { margin: 0 0 8px; display: flex; gap: 12px; align-items: baseline; }
+.step h3::before { counter-increment: s; content: counter(s); font: 800 15px "Bricolage Grotesque"; color: var(--bg); background: var(--accent); width: 28px; height: 28px; border-radius: 9px; display: inline-grid; place-items: center; flex: none; transform: translateY(-2px); }
+.step p { color: var(--ink2); }
+.step img { width: 100%; border-radius: 12px; display: block; background: var(--stage); }
+.step pre { font-size: 12.5px; }
+.meta { font: 500 12.5px "IBM Plex Mono"; color: var(--ink3); margin-top: 8px; }
+
+/* tables */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--card); margin-bottom: 18px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 12.5px "IBM Plex Sans"; text-transform: uppercase; letter-spacing: .06em; color: var(--ink3); background: var(--bg2); }
+tr:last-child td { border-bottom: 0; }
+td:first-child { white-space: nowrap; }
+td code { font-size: 12.5px; }
+
+/* playground */
+.play { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+@media (max-width: 900px) { .play { grid-template-columns: minmax(0, 1fr); } }
+.play textarea { width: 100%; height: 420px; white-space: pre; overflow-wrap: normal; resize: vertical; background: var(--code-bg); color: var(--code-ink); border: 0; border-radius: 12px; padding: 14px; font: 12.5px/1.5 "IBM Plex Mono", monospace; }
+.play .bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0 0; }
+.play select, .play button { font: 600 14px "IBM Plex Sans"; border-radius: 10px; padding: 9px 14px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+.play button.go { background: var(--teal); color: #fff; border-color: var(--teal); }
+.play button:disabled { opacity: .6; cursor: progress; }
+.out { background: var(--stage); border-radius: 14px; min-height: 280px; display: grid; place-items: center; overflow: hidden; color: #b9b4a8; font-size: 14px; text-align: center; }
+.out img { width: 100%; display: block; }
+.status { font: 500 13px "IBM Plex Mono"; color: var(--ink3); margin-top: 10px; min-height: 1.5em; overflow-wrap: anywhere; }
+.status.err { color: var(--rust); }
+
+.note { border-left: 4px solid var(--mustard); background: var(--accent-bg); padding: 12px 16px; border-radius: 0 10px 10px 0; color: var(--ink); margin: 0 0 18px; font-size: 15px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 860px) { .grid3 { grid-template-columns: minmax(0, 1fr); } }
+.num { font: 800 34px "Bricolage Grotesque"; color: var(--ink); line-height: 1; margin-bottom: 6px; }
+.num small { font-size: 16px; color: var(--ink3); font-weight: 600; }
+.card .sub { color: var(--ink2); font-size: 14.5px; }
+ul.tight { margin: 0 0 14px; padding-left: 20px; } ul.tight li { margin: 4px 0; }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.toc a { font-size: 13.5px; text-decoration: none; color: var(--ink2); border: 1px solid var(--line); background: var(--card); border-radius: 99px; padding: 4px 11px; }
+footer { padding: 40px 0 60px; color: var(--ink3); font-size: 14px; border-top: 1px solid var(--line); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: space-between; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="11" r="8" fill="#f2b134"/><path d="M16 19v8M16 23l-6 5M16 23l6 5" stroke="#2a9d8f" stroke-width="3" stroke-linecap="round" fill="none"/></svg>rig-worker</a>
+    <nav>
+      <a href="#connect">Connect</a><a href="#pipeline">Pipeline</a><a href="#playground">Playground</a><a href="#tools">Tools</a><a href="#modelling">Modelling</a><a href="#rigging">Rigging</a><a href="#self-host">Self-host</a>
+      <a href="https://github.com/epinnock/rig-worker">GitHub</a>
+    </nav>
+    <button class="theme" id="theme" aria-label="Switch light or dark theme" title="Light / dark">◐</button>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <div>
+      <div class="eyebrow"><b>MCP</b> 13 tools · pure JavaScript · MIT</div>
+      <h1>Agents that <em>model, rig and animate</em> 3D characters.</h1>
+      <p class="lede">rig-worker is an MCP server in a single Cloudflare Worker. An agent describes a character as simple shapes, gets back one closed mesh, places bones, binds them with automatic weights, keys a walk, and checks every step with rendered pictures and numbers. No Blender, no GPU, no install.</p>
+      <div class="ctas">
+        <a class="btn primary" href="#connect">Try the public MCP</a>
+        <a class="btn" href="https://deploy.workers.cloudflare.com/?url=https://github.com/epinnock/rig-worker">Deploy your own</a>
+        <a class="btn" href="https://github.com/epinnock/rig-worker">GitHub ↗</a>
+      </div>
+      <div class="facts"><span>glTF in, glTF out</span><span>bone heat like Blender's Automatic Weights</span><span>pictures for the agent at every step</span></div>
+    </div>
+    <div class="stage">
+      <model-viewer src="assets/pip.glb" alt="Pip, a toy explorer in a raincoat, walking" autoplay camera-controls disable-zoom touch-action="pan-y" camera-orbit="32deg 78deg 2.6m" camera-target="0m 0.52m 0m" field-of-view="26deg" exposure="1.05" shadow-intensity="0.9" shadow-softness="0.8" environment-image="neutral" interaction-prompt="none" loading="eager">
+        <img class="poster" slot="poster" src="img/hero.png" alt="">
+      </model-viewer>
+      <span class="tag2">built by the tools</span>
+      <span class="tag">pip.glb · 19 shapes · 14 bones · walk 1 s loop · drag to orbit</span>
+    </div>
+  </div>
+</div>
+
+<section id="connect">
+  <div class="wrap">
+    <div class="kicker">Connect</div>
+    <h2>Add it to your agent in one line</h2>
+    <p class="intro">The public demo needs no token. It is rate limited and keeps your files (separate per client IP) for a day. Point any MCP client that speaks Streamable HTTP at the <code>/mcp</code> URL.</p>
+    <div class="cols">
+      <div class="card">
+        <h3>Claude Code</h3>
+<pre><code>claude mcp add --transport http rig-worker \
+  https://rig-worker-demo.epinnock.workers.dev/mcp</code></pre>
+        <p>Then ask: <em>"Use rig-worker to model a small toy robot, rig it and make it wave. Show me the pictures."</em></p>
+      </div>
+      <div class="card">
+        <h3>Any MCP client (JSON config)</h3>
+<pre><code>{
+  <span class="s">"mcpServers"</span>: {
+    <span class="s">"rig-worker"</span>: {
+      <span class="s">"type"</span>: <span class="s">"http"</span>,
+      <span class="s">"url"</span>: <span class="s">"https://rig-worker-demo.epinnock.workers.dev/mcp"</span>
+    }
+  }
+}</code></pre>
+        <p>Your own deployment adds <code>"headers": {"Authorization": "Bearer &lt;RIG_TOKEN&gt;"}</code>.</p>
+      </div>
+    </div>
+    <h3>Or run the whole example from a terminal</h3>
+<pre><code>git clone https://github.com/epinnock/rig-worker && cd rig-worker
+node examples/pip/run.mjs            <span class="c"># model -> bind -> walk -> qa on the public demo, pictures in out/pip</span></code></pre>
+  </div>
+</section>
+
+<section id="pipeline">
+  <div class="wrap">
+    <div class="kicker">The pipeline</div>
+    <h2>From shapes to a walking character</h2>
+    <p class="intro">Every picture on this page came out of the tools, the same pictures an agent sees after each call. The calls below are the ones in <a href="https://github.com/epinnock/rig-worker/tree/main/examples/pip"><code>examples/pip</code></a>; on the public demo the whole run takes about 23 seconds.</p>
+    <div class="steps">
+      <div class="step">
+        <div>
+          <h3>Model it from shapes</h3>
+          <p>A model is a list of signed-distance shapes (spheres, capsules, tapered tubes, lathes, boxes...) combined in order with smooth unions, cuts and paint. The Worker meshes it into <b>one closed, watertight mesh with vertex colours</b>, ready to rig, and returns a preview in the same call.</p>
+<pre><code>{ <span class="s">"name"</span>: <span class="s">"model"</span>, <span class="s">"arguments"</span>: { <span class="s">"out"</span>: <span class="s">"pip.glb"</span>, <span class="s">"preview"</span>: {}, <span class="s">"model"</span>: { <span class="s">"shapes"</span>: [
+  { <span class="s">"name"</span>: <span class="s">"head"</span>, <span class="s">"type"</span>: <span class="s">"sphere"</span>, <span class="s">"at"</span>: [0, 0.84, 0], <span class="s">"radius"</span>: 0.2, <span class="s">"blend"</span>: 0.04, <span class="s">"color"</span>: <span class="s">"#f1c6a6"</span> },
+  { <span class="s">"name"</span>: <span class="s">"arm"</span>, <span class="s">"type"</span>: <span class="s">"tube"</span>, <span class="s">"mirror"</span>: <span class="s">"x"</span>, <span class="s">"points"</span>: [[0.12, 0.64, 0, 0.052], [0.22, 0.52, 0.01, 0.046], [0.27, 0.41, 0.03, 0.043]], <span class="s">"blend"</span>: 0.03 },
+  { <span class="s">"name"</span>: <span class="s">"eye"</span>, <span class="s">"type"</span>: <span class="s">"ellipsoid"</span>, <span class="s">"mirror"</span>: <span class="s">"x"</span>, <span class="s">"radii"</span>: [0.026, 0.032, 0.014], ... },
+  ...
+] } } }</code></pre>
+          <div class="meta">19 shapes · 56,790 vertices · 1 piece · 8.0 s</div>
+        </div>
+        <div><img src="img/model.png" alt="Pip from the front, three-quarter, side and back" loading="lazy" width="1280" height="320"><img src="img/face.png" alt="Close-up of Pip's face" loading="lazy" style="margin-top:10px" width="640" height="320"></div>
+      </div>
+      <div class="step">
+        <div>
+          <h3>Check the skeleton before binding</h3>
+          <p><code>preview</code> overlays a proposed skeleton on the mesh, so the agent can see a knee sitting outside the leg before it spends a bind. Bones are plain JSON: a head, a tail and a parent, in metres.</p>
+<pre><code>{ <span class="s">"name"</span>: <span class="s">"UpperLeg.L"</span>, <span class="s">"parent"</span>: <span class="s">"Hips"</span>,
+  <span class="s">"head"</span>: [0.075, 0.36, 0], <span class="s">"tail"</span>: [0.08, 0.2, 0.005] }</code></pre>
+          <div class="meta">14 bones, including a bobble on the hat · 0.6 s</div>
+        </div>
+        <div><img src="img/skeleton.png" alt="Skeleton overlay on Pip, front and side" loading="lazy" width="640" height="320"></div>
+      </div>
+      <div class="step">
+        <div>
+          <h3>Bind with automatic weights</h3>
+          <p><code>bind</code> solves bone heat (Baran &amp; Popović 2007, the method behind Blender's <em>Automatic Weights</em>) on a closed voxel proxy, so it also works on broken scan or AI-generated meshes. A weights preview shows which bone owns each vertex.</p>
+<pre><code>{ <span class="s">"name"</span>: <span class="s">"bind"</span>, <span class="s">"arguments"</span>: { <span class="s">"file"</span>: <span class="s">"pip.glb"</span>, <span class="s">"out"</span>: <span class="s">"pip_rig.glb"</span>, <span class="s">"skeleton"</span>: { <span class="s">"bones"</span>: [...] } } }
+<span class="c">// -> { createdSkin: true, vertices: 56790, bones: 14, bonesOwningNoVertex: [] }</span></code></pre>
+          <div class="meta">9.0 s on the demo Worker</div>
+        </div>
+        <div><img src="img/weights.png" alt="Pip coloured by dominant bone" loading="lazy" width="960" height="320"></div>
+      </div>
+      <div class="step">
+        <div>
+          <h3>Animate, then check it</h3>
+          <p><code>animate</code> writes keyframes as Euler degrees per bone. <code>qa</code> samples the clip and reports frames that sink below the floor, stretched or squashed edges, and hotspots with a ready-made region to repair with <code>paint_weights</code>.</p>
+<pre><code>{ <span class="s">"name"</span>: <span class="s">"qa"</span>, <span class="s">"arguments"</span>: { <span class="s">"file"</span>: <span class="s">"pip_rig.glb"</span>, <span class="s">"animation"</span>: <span class="s">"walk"</span>, <span class="s">"frames"</span>: 24 } }
+<span class="c">// -> summary: { framesSinkingBelowGround: 0, maxSink: 0.002, worstEdgeRatio: 4.88 }</span>
+<span class="c">//    hotspots: [{ dominantBone: "LowerLeg.L", restBox, surfacePoint, points, ... }]</span></code></pre>
+          <div class="meta">walk: 15 channels, 8 keys, 1 s loop · qa 1.4 s</div>
+        </div>
+        <div><img src="img/walk_side.png" alt="Eight frames of Pip's walk from the side" loading="lazy" width="1024" height="512"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="playground">
+  <div class="wrap">
+    <div class="kicker">Playground</div>
+    <h2>Build a model on the public demo</h2>
+    <p class="intro">This calls the <code>model</code> tool on the demo Worker straight from your browser. Edit the JSON (change a colour, move the pompom, add a shape) and build. The demo allows 6 builds a minute.</p>
+    <div class="play">
+      <div>
+        <textarea id="json" spellcheck="false" aria-label="Model JSON"></textarea>
+        <div class="bar">
+          <select id="preset" aria-label="Preset">
+            <option value="pip">Pip (19 shapes)</option>
+            <option value="snow">Snowman (8 shapes)</option>
+            <option value="vase">Lathe vase (2 shapes)</option>
+          </select>
+          <select id="res" aria-label="Detail">
+            <option value="0.012">fast (res 1.2 cm)</option>
+            <option value="0.008" selected>medium (0.8 cm)</option>
+            <option value="0.006">fine (0.6 cm)</option>
+          </select>
+          <button class="go" id="build">Build ▸</button>
+        </div>
+      </div>
+      <div>
+        <div class="out" id="out"><span>The preview appears here.</span></div>
+        <div class="status" id="status"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tools">
+  <div class="wrap">
+    <div class="kicker">Reference</div>
+    <h2>The 13 tools</h2>
+    <p class="intro">Files are GLBs in the Worker's R2 bucket, named with letters, digits, <code>.</code> <code>_</code> <code>-</code>. Tools that change a file take <code>out</code> to save under a new name (default: overwrite). The full JSON schemas come from <code>tools/list</code>.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Tool</th><th>What it does</th><th>Key arguments</th></tr></thead>
+      <tbody>
+        <tr><td><code>model</code></td><td>Shapes → one closed mesh with vertex colours; stores the model JSON in the file so later calls send only a patch. Optional preview in the same call.</td><td><code>out</code>, <code>model {shapes, res}</code> or <code>from</code> + <code>patch</code>, <code>res</code>, <code>preview</code></td></tr>
+        <tr><td><code>get_model</code></td><td>The model JSON inside a file made by <code>model</code>.</td><td><code>file</code></td></tr>
+        <tr><td><code>inspect</code></td><td>Bounds, counts, horizontal slices with separate blobs (legs and arms show up as clusters), current skeleton and animations.</td><td><code>file</code>, <code>slices</code></td></tr>
+        <tr><td><code>preview</code></td><td>PNG views: shaded, weights (colour per dominant bone) or one bone's weight; skeleton overlay or a proposed skeleton; a pose; animation frames; zoom on a joint.</td><td><code>file</code>, <code>mode</code>, <code>bone</code>, <code>views</code>, <code>elev</code>, <code>skeleton</code>, <code>pose</code>, <code>frames</code>, <code>time</code>, <code>focus</code>, <code>res</code></td></tr>
+        <tr><td><code>bind</code></td><td>Builds the skeleton and skin (or re-weights an existing skin) with bone-heat weights.</td><td><code>file</code>, <code>skeleton {bones}</code>, <code>options {voxel, lapScale}</code></td></tr>
+        <tr><td><code>get_skeleton</code></td><td>The skin's skeleton as bind JSON, to edit and bind again.</td><td><code>file</code></td></tr>
+        <tr><td><code>paint_weights</code></td><td>Set, add or scale one bone's weight in a sphere or box; other bones keep their proportions; top 4, normalised.</td><td><code>bone</code>, <code>region</code>, <code>op</code>, <code>value</code>, <code>falloff</code></td></tr>
+        <tr><td><code>animate</code></td><td>Writes or replaces a keyframed clip: rotations per bone, offsets for the root.</td><td><code>name</code>, <code>duration</code>, <code>loop</code>, <code>interpolation</code>, <code>tracks [{bone, keys [{t, rot, move}]}]</code></td></tr>
+        <tr><td><code>qa</code></td><td>Samples a clip or pose: frames below the rest-pose floor, edges past a length ratio, hotspots with <code>restBox</code>, <code>surfacePoint</code> and flagged <code>points</code>.</td><td><code>animation</code> or <code>pose</code>, <code>frames</code>, <code>stretch</code>, <code>sinkTolerance</code></td></tr>
+        <tr><td><code>export</code></td><td>A signed download link (no header needed).</td><td><code>file</code>, <code>expires_minutes</code></td></tr>
+        <tr><td><code>list_files</code></td><td>Stored files with sizes.</td><td></td></tr>
+        <tr><td><code>delete_file</code></td><td>Delete a stored file.</td><td><code>file</code></td></tr>
+        <tr><td><code>import_url</code></td><td>Fetch a GLB from a URL into storage (self-hosted only).</td><td><code>url</code>, <code>name</code></td></tr>
+      </tbody>
+    </table></div>
+    <h3>Conventions</h3>
+    <ul class="tight">
+      <li><b>Space:</b> glTF metres, <b>+Y up, +Z front, +X the character's left</b>. Stand characters on <code>y = 0</code> facing +Z.</li>
+      <li><b>Rotations:</b> Euler degrees <code>[x, y, z]</code>, applied X, then Y, then Z, about the joint's rest axes, which <code>bind</code> makes world-aligned. +X swings a leg back, +Y turns toward the character's left, +Z raises the left arm.</li>
+      <li><b>Views:</b> azimuth degrees, 0 = front, 90 = the character's left side. The default camera frames the rest-pose bounds and stays the same between calls, so pictures compare.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="modelling">
+  <div class="wrap">
+    <div class="kicker">Modelling</div>
+    <h2>Sculpting with clay primitives</h2>
+    <p class="intro">Each shape is combined, in list order, with everything before it. Because the result is one signed distance field, the mesh is always closed and in one piece when the parts overlap, which is exactly what rigging wants.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Type</th><th>Parameters (local frame)</th><th>Good for</th></tr></thead>
+      <tbody>
+        <tr><td><code>sphere</code></td><td><code>radius</code></td><td>heads, hands, eyes</td></tr>
+        <tr><td><code>ellipsoid</code></td><td><code>radii [x, y, z]</code></td><td>bodies, ears, flattened eyes</td></tr>
+        <tr><td><code>box</code></td><td><code>size [x, y, z]</code>, <code>round</code></td><td>boots, backpacks, robots</td></tr>
+        <tr><td><code>cylinder</code></td><td><code>radius</code>, <code>height</code>, <code>round</code> (axis Y)</td><td>brims, wheels, posts</td></tr>
+        <tr><td><code>cone</code></td><td><code>radius</code>, <code>radiusTop</code>, <code>height</code> (axis Y)</td><td>skirts, hats, noses</td></tr>
+        <tr><td><code>torus</code></td><td><code>radius</code>, <code>thickness</code> (ring in XZ)</td><td>collars, hat folds, mouths (as a cut)</td></tr>
+        <tr><td><code>capsule</code></td><td><code>from</code>, <code>to</code>, <code>radius</code>, <code>radiusTo</code></td><td>torsos, simple limbs</td></tr>
+        <tr><td><code>tube</code></td><td><code>points [[x, y, z, r], ...]</code></td><td>arms, legs, tails, hair strands</td></tr>
+        <tr><td><code>lathe</code></td><td><code>profile [[r, y], ...]</code> revolved round Y</td><td>bottles, vases, hats</td></tr>
+        <tr><td><code>group</code></td><td><code>shapes [...]</code>, combined as one shape</td><td>a cap = sphere minus a box, without cutting the head</td></tr>
+      </tbody>
+    </table></div>
+    <div class="cols">
+      <div class="card">
+        <h3>Fields on every shape</h3>
+        <ul class="tight">
+          <li><code>name</code>: unique, used by patches</li>
+          <li><code>op</code>: <code>union</code> (default), <code>subtract</code>, <code>intersect</code>, <code>paint</code> (recolour only)</li>
+          <li><code>blend</code>: metres of smooth fillet with what came before (0.01 to 0.05 for body joins)</li>
+          <li><code>mirror: "x"</code>: adds the copy at −x; model the left side at +x</li>
+          <li><code>at</code>, <code>rot</code>: move and turn (degrees, X then Y then Z)</li>
+          <li><code>color</code>: <code>#rrggbb</code>; a shape without one takes the colour under it</li>
+        </ul>
+        <p>Resolution: <code>res</code> defaults to the model's size / 160 (a 1.7 m figure gets about 1 cm and 25k vertices). Smaller is finer and slower, capped at 8M grid points.</p>
+      </div>
+      <div class="card">
+        <h3>Patch instead of resending</h3>
+        <p>The model JSON lives inside the GLB, so refinements are small:</p>
+<pre><code>{ <span class="s">"out"</span>: <span class="s">"pip2.glb"</span>, <span class="s">"from"</span>: <span class="s">"pip.glb"</span>, <span class="s">"patch"</span>: [
+  { <span class="s">"name"</span>: <span class="s">"beanie"</span>, <span class="s">"color"</span>: <span class="s">"#cc3344"</span> },
+  { <span class="s">"name"</span>: <span class="s">"scarf"</span>, <span class="s">"type"</span>: <span class="s">"torus"</span>, <span class="s">"before"</span>: <span class="s">"head"</span>,
+    <span class="s">"at"</span>: [0, 0.66, 0], <span class="s">"radius"</span>: 0.12, <span class="s">"thickness"</span>: 0.03 },
+  { <span class="s">"name"</span>: <span class="s">"pocket"</span>, <span class="s">"remove"</span>: <span class="s">true</span> }
+] }</code></pre>
+        <p>A patch merges fields (<code>null</code> removes one), adds new names at the end, <code>into</code> a group or <code>before</code> a shape. The result tells you per-shape vertex counts and warns about shapes with no visible effect and separate pieces.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="rigging">
+  <div class="wrap">
+    <div class="kicker">Rigging</div>
+    <h2>The loop an agent runs</h2>
+    <p class="intro"><b>inspect</b> → <b>preview</b> with a proposed skeleton → <b>bind</b> → <b>preview</b> <code>mode: "weights"</code> → <b>animate</b> → <b>preview</b> frames + <b>qa</b> → <b>paint_weights</b> fixes → <b>export</b>. The same loop works on a GLB you upload: <code>bind</code> voxelizes the mesh into a closed proxy first, so hollow or many-piece meshes still get clean weights.</p>
+    <div class="cols">
+      <div class="card">
+        <h3>Skeleton JSON</h3>
+<pre><code>{ <span class="s">"bones"</span>: [
+  { <span class="s">"name"</span>: <span class="s">"Hips"</span>,  <span class="s">"parent"</span>: <span class="k">null</span>,   <span class="s">"head"</span>: [0, 0.38, 0], <span class="s">"tail"</span>: [0, 0.5, 0] },
+  { <span class="s">"name"</span>: <span class="s">"Spine"</span>, <span class="s">"parent"</span>: <span class="s">"Hips"</span>, <span class="s">"head"</span>: [0, 0.5, 0],  <span class="s">"tail"</span>: [0, 0.66, 0] },
+  { <span class="s">"name"</span>: <span class="s">"Nose"</span>,  <span class="s">"parent"</span>: <span class="s">"Head"</span>, <span class="s">"head"</span>: [...], <span class="s">"tail"</span>: [...],
+    <span class="s">"falloff"</span>: { <span class="s">"radius"</span>: 0.04, <span class="s">"power"</span>: 2, <span class="s">"at"</span>: <span class="s">"tail"</span> } }
+] }</code></pre>
+        <p><code>falloff</code> gives tiny bones (a nose, an ear tip) distance weights instead of heat. Bind again with an edited skeleton to move bones; bone names must match the existing skin.</p>
+      </div>
+      <div class="card">
+        <h3>Fixing weights</h3>
+        <img src="img/bone_spine.png" alt="Spine bone weight, blue 0 to red 1" loading="lazy" style="width:100%;border-radius:10px;margin-bottom:12px" width="640" height="320">
+<pre><code>{ <span class="s">"bone"</span>: <span class="s">"Spine"</span>, <span class="s">"op"</span>: <span class="s">"set"</span>, <span class="s">"value"</span>: 1, <span class="s">"falloff"</span>: <span class="s">"smooth"</span>,
+  <span class="s">"region"</span>: { <span class="s">"sphere"</span>: { <span class="s">"centre"</span>: [0, 0.52, -0.2], <span class="s">"radius"</span>: 0.11 } } }</code></pre>
+        <p>Prefer a smooth sphere to a hard box: a box with <code>set 1</code> leaves a seam where it ends (on Pip it raised the worst edge ratio from 5 to 20).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="self-host">
+  <div class="wrap">
+    <div class="kicker">Self-host</div>
+    <h2>Your own private Worker</h2>
+    <p class="intro">Self-hosting removes the demo limits and keeps your files private behind a token. You need a Cloudflare account on the Workers Paid plan, because a bind on a large mesh can use up to a minute of CPU (the config allows 5 minutes).</p>
+    <div class="cols">
+      <div class="card">
+        <h3>One click</h3>
+        <p><a href="https://deploy.workers.cloudflare.com/?url=https://github.com/epinnock/rig-worker"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare" height="32" style="vertical-align:middle"></a></p>
+        <p>Cloudflare forks the repo, creates the R2 bucket and asks for <code>RIG_TOKEN</code>: any long random string (<code>openssl rand -hex 32</code>). Clients send it as <code>Authorization: Bearer …</code>; it also signs download links.</p>
+      </div>
+      <div class="card">
+        <h3>From a terminal</h3>
+<pre><code>git clone https://github.com/epinnock/rig-worker && cd rig-worker
+npm install
+npx wrangler deploy                 <span class="c"># creates the R2 bucket on first deploy</span>
+openssl rand -hex 32 | npx wrangler secret put RIG_TOKEN
+claude mcp add --transport http rig-worker https://rig-worker.&lt;you&gt;.workers.dev/mcp \
+  --header "Authorization: Bearer &lt;RIG_TOKEN&gt;"</code></pre>
+      </div>
+    </div>
+    <h3>Develop and test locally</h3>
+<pre><code>cp .dev.vars.example .dev.vars      <span class="c"># put a token in it</span>
+npm run dev                         <span class="c"># wrangler dev on :8799, local R2</span>
+npm test                            <span class="c"># model -> bind -> animate -> qa in Node, no network, ~15 s</span>
+RIG_TOKEN=... node examples/pip/run.mjs http://127.0.0.1:8799</code></pre>
+    <h3>Plain HTTP, besides MCP</h3>
+    <div class="tbl"><table>
+      <thead><tr><th>Route</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>POST /mcp</code></td><td>MCP Streamable HTTP (stateless JSON responses, protocol 2025-06-18)</td></tr>
+        <tr><td><code>PUT /files/&lt;name&gt;</code></td><td>Upload a GLB (body = bytes, max 64 MB; 8 MB on the demo)</td></tr>
+        <tr><td><code>GET /files</code>, <code>GET|DELETE /files/&lt;name&gt;</code></td><td>List, download, delete</td></tr>
+        <tr><td><code>GET /dl/&lt;name&gt;?exp&amp;sig</code></td><td>Signed download from <code>export</code>, no header</td></tr>
+        <tr><td><code>POST /bind</code></td><td>Multipart <code>glb</code> + <code>skeleton</code> (+ <code>opts</code>) → rigged GLB, stats in <code>x-rig-stats</code> (self-hosted only)</td></tr>
+      </tbody>
+    </table></div>
+    <h3>Public demo limits</h3>
+    <p>The demo is the same code with <code>DEMO=1</code> (<code>npx wrangler deploy --env demo</code>): no token, so everything is capped.</p>
+    <div class="tbl"><table>
+      <tbody>
+        <tr><td>Requests</td><td>30 a minute per client IP; <code>model</code> and <code>bind</code> 6 a minute per client and 12 a minute overall</td></tr>
+        <tr><td>Files</td><td>a separate space per client IP (an HMAC of it, not the IP itself), at most 25 files, deleted after a day; uploads up to 8 MB</td></tr>
+        <tr><td>Meshes</td><td>up to 150k vertices; <code>model</code> up to 100 shapes and 4M grid points; <code>bind</code> voxel ≥ 0.008</td></tr>
+        <tr><td>Off</td><td><code>import_url</code> and <code>POST /bind</code>; links expire within 24 h; 60 s of CPU per call</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<section id="numbers">
+  <div class="wrap">
+    <div class="kicker">Measured</div>
+    <h2>Speed, cost and accuracy</h2>
+    <div class="grid3">
+      <div class="card"><div class="num">23 <small>s</small></div><div class="sub">The full Pip run on the public demo: model 8.0 s, bind 9.0 s, qa 1.4 s, four previews, paint, animate, export.</div></div>
+      <div class="card"><div class="num">97.6<small>%</small></div><div class="sub">Vertices whose dominant bone matches Blender 4.5's Automatic Weights on a test creature mesh, with the same skeleton.</div></div>
+      <div class="card"><div class="num">$2.59</div><div class="sub">API cost for an Opus 5.5 agent that modelled a 44-shape toy character, rigged it with 19 bones and walked it, in 14 minutes and 53 turns. Worker CPU: about 1 cent.</div></div>
+    </div>
+    <h3>How it works</h3>
+    <ul class="tight">
+      <li><b>Modelling</b> (<code>src/sdf.js</code>): shapes compile to signed distance functions with bounding-sphere pruning; the field is sampled on a sparse grid (one sample per 4³ block away from the surface), meshed with surface nets, each vertex projected onto the true surface, coloured by the shape that owns it.</li>
+      <li><b>Weights</b> (<code>src/heat.js</code>): voxelize, close small gaps and flood-fill to a solid; extract and smooth a closed proxy surface; solve <code>(L + A·H) w = A·H·p</code> per bone with a cotangent Laplacian and visibility-tested nearest bones; copy weights back by nearest point; keep 4 influences.</li>
+      <li><b>Pictures</b> (<code>src/render.js</code>): a small software rasterizer writes PNG tiles with skeleton overlays, so the agent can look at its own work.</li>
+      <li>Everything is plain JavaScript on typed arrays. The only dependency is <a href="https://gltf-transform.dev">glTF Transform</a> for reading and writing GLB.</li>
+    </ul>
+    <h3>Known gaps</h3>
+    <ul class="tight">
+      <li>No smoothing or removing of weights as an operation, and no undo for <code>paint_weights</code> (use <code>out</code> to keep versions).</li>
+      <li><code>qa</code> flags edges by length ratio and does not yet say stretched or squashed; tiny surface-net edges near creases can show high ratios.</li>
+      <li>Rebuilding a model with a patch gives an unrigged mesh: bind it again (the skeleton JSON is reusable).</li>
+      <li>Vertex colours only, no textures or UVs; linear blend skinning with 4 influences.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>rig-worker · MIT licence · © 2026 Ejiro Pinnock</span>
+    <span><a href="https://github.com/epinnock/rig-worker">GitHub</a> · <a href="https://github.com/epinnock/rig-worker/issues">Issues</a> · <a href="https://rig-worker-demo.epinnock.workers.dev/">Demo Worker</a></span>
+  </div>
+</footer>
+
+<script>
+// theme toggle (remembered per browser when storage is available)
+const root = document.documentElement, KEY = 'rig-worker-theme';
+try { const t = localStorage.getItem(KEY); if (t) root.dataset.theme = t; } catch {}
+document.getElementById('theme').onclick = () => {
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem(KEY, root.dataset.theme); } catch {}
+};
+// copy buttons on code blocks
+for (const pre of document.querySelectorAll('pre')) {
+  const b = document.createElement('button'); b.className = 'copy'; b.textContent = 'Copy';
+  b.onclick = async () => { try { await navigator.clipboard.writeText(pre.querySelector('code').innerText); b.textContent = 'Copied'; setTimeout(() => (b.textContent = 'Copy'), 1400); } catch {} };
+  pre.appendChild(b);
+}
+// playground
+const DEMO = 'https://rig-worker-demo.epinnock.workers.dev/mcp';
+const presets = {
+  snow: { shapes: [
+    { name: 'base', type: 'sphere', at: [0, 0.3, 0], radius: 0.3, color: '#f4f6fb' },
+    { name: 'middle', type: 'sphere', at: [0, 0.72, 0], radius: 0.22, blend: 0.05, color: '#f4f6fb' },
+    { name: 'head', type: 'sphere', at: [0, 1.04, 0], radius: 0.15, blend: 0.04, color: '#f4f6fb' },
+    { name: 'carrot', type: 'cone', at: [0, 1.04, 0.2], rot: [90, 0, 0], radius: 0.028, radiusTop: 0.004, height: 0.14, blend: 0.01, color: '#e8742a' },
+    { name: 'eye', type: 'sphere', mirror: 'x', at: [0.05, 1.09, 0.135], radius: 0.018, color: '#1d1d24' },
+    { name: 'scarf', type: 'torus', at: [0, 0.9, 0], radius: 0.13, thickness: 0.045, blend: 0.01, color: '#c4553a' },
+    { name: 'hat', type: 'cylinder', at: [0, 1.25, 0], radius: 0.1, height: 0.16, round: 0.01, blend: 0.005, color: '#2e3a59' },
+    { name: 'brim', type: 'cylinder', at: [0, 1.17, 0], radius: 0.16, height: 0.02, round: 0.008, color: '#2e3a59' },
+  ] },
+  vase: { shapes: [
+    { name: 'body', type: 'lathe', profile: [[0, 0], [0.12, 0], [0.2, 0.12], [0.22, 0.25], [0.14, 0.42], [0.09, 0.5], [0.11, 0.56], [0, 0.56]], color: '#2a9d8f' },
+    { name: 'band', type: 'torus', at: [0, 0.25, 0], radius: 0.22, thickness: 0.02, op: 'paint', color: '#f2b134' },
+  ] },
+};
+const ta = document.getElementById('json'), out = document.getElementById('out'), st = document.getElementById('status'), go = document.getElementById('build');
+const show = (m) => {
+  const one = (o) => JSON.stringify(o).replace(/":/g, '": ').replace(/,(?=["{\[-\d])/g, ', ');
+  const rest = Object.entries(m).filter(([k]) => k !== 'shapes').map(([k, v]) => `,\n "${k}": ${JSON.stringify(v)}`).join('');
+  ta.value = `{ "shapes": [\n${m.shapes.map((x) => '  ' + one(x)).join(',\n')}\n ]${rest}\n}`;
+};
+async function load(name) {
+  if (name === 'pip') { try { presets.pip = await (await fetch('assets/pip.model.json')).json(); delete presets.pip.res; } catch { presets.pip = presets.snow; } }
+  show(presets[name]);
+}
+document.getElementById('preset').onchange = (e) => load(e.target.value);
+load('pip');
+go.onclick = async () => {
+  let model;
+  try { model = JSON.parse(ta.value); } catch (e) { st.className = 'status err'; st.textContent = `JSON: ${e.message}`; return; }
+  model.res = +document.getElementById('res').value;
+  go.disabled = true; st.className = 'status'; const t0 = performance.now();
+  const tick = setInterval(() => (st.textContent = `building on the demo Worker… ${((performance.now() - t0) / 1000).toFixed(1)} s`), 100);
+  try {
+    const r = await fetch(DEMO, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'model', arguments: { out: 'playground.glb', model, preview: { views: [0, 35, 90, 180], res: 256 } } } }) });
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message);
+    const texts = j.result.content.filter((c) => c.type === 'text').map((c) => c.text);
+    if (j.result.isError) throw new Error(texts.join(' ').replace(/^error: /, ''));
+    const img = j.result.content.find((c) => c.type === 'image');
+    out.innerHTML = ''; const im = new Image(); im.alt = 'Preview of your model'; im.src = `data:image/png;base64,${img.data}`; out.appendChild(im);
+    const info = JSON.parse(texts[0]);
+    st.textContent = `${info.vertices.toLocaleString()} vertices · ${info.pieces} piece${info.pieces > 1 ? 's' : ''} · res ${info.res} · ${((performance.now() - t0) / 1000).toFixed(1)} s round trip${info.warnings?.length ? ' · ' + info.warnings.join('; ') : ''}`;
+  } catch (e) { st.className = 'status err'; st.textContent = e.message; }
+  finally { clearInterval(tick); go.disabled = false; }
+};
+</script>
+</body>
+</html>

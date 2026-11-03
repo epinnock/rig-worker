@@ -1,0 +1,1 @@
+[{ "bone": "Spine", "region": { "sphere": { "centre": [0, 0.52, -0.2], "radius": 0.11 } }, "op": "set", "value": 1, "falloff": "smooth" }]

@@ -1,0 +1,347 @@
+{
+ "shapes": [
+  {
+   "name": "torso",
+   "type": "capsule",
+   "from": [
+    0,
+    0.45,
+    0
+   ],
+   "to": [
+    0,
+    0.6,
+    0
+   ],
+   "radius": 0.14,
+   "color": "#f2b134"
+  },
+  {
+   "name": "skirt",
+   "type": "cone",
+   "at": [
+    0,
+    0.4,
+    0
+   ],
+   "radius": 0.165,
+   "radiusTop": 0.12,
+   "height": 0.16,
+   "blend": 0.03,
+   "color": "#f2b134"
+  },
+  {
+   "name": "leg",
+   "type": "tube",
+   "mirror": "x",
+   "points": [
+    [
+     0.075,
+     0.36,
+     0,
+     0.058
+    ],
+    [
+     0.08,
+     0.2,
+     0.005,
+     0.052
+    ],
+    [
+     0.08,
+     0.09,
+     0,
+     0.05
+    ]
+   ],
+   "blend": 0.03,
+   "color": "#2e3a59"
+  },
+  {
+   "name": "boot",
+   "type": "box",
+   "mirror": "x",
+   "at": [
+    0.082,
+    0.05,
+    0.025
+   ],
+   "size": [
+    0.115,
+    0.1,
+    0.19
+   ],
+   "round": 0.045,
+   "blend": 0.02,
+   "color": "#7a3b2e"
+  },
+  {
+   "name": "collar",
+   "type": "torus",
+   "at": [
+    0,
+    0.67,
+    0
+   ],
+   "radius": 0.11,
+   "thickness": 0.035,
+   "blend": 0.02,
+   "color": "#f2b134"
+  },
+  {
+   "name": "head",
+   "type": "sphere",
+   "at": [
+    0,
+    0.84,
+    0
+   ],
+   "radius": 0.2,
+   "blend": 0.04,
+   "color": "#f1c6a6"
+  },
+  {
+   "name": "nose",
+   "type": "sphere",
+   "at": [
+    0,
+    0.81,
+    0.195
+   ],
+   "radius": 0.022,
+   "blend": 0.012,
+   "color": "#eab497"
+  },
+  {
+   "name": "arm",
+   "type": "tube",
+   "mirror": "x",
+   "points": [
+    [
+     0.12,
+     0.64,
+     0,
+     0.052
+    ],
+    [
+     0.22,
+     0.52,
+     0.01,
+     0.046
+    ],
+    [
+     0.27,
+     0.41,
+     0.03,
+     0.043
+    ]
+   ],
+   "blend": 0.03,
+   "color": "#f2b134"
+  },
+  {
+   "name": "mitten",
+   "type": "sphere",
+   "mirror": "x",
+   "at": [
+    0.285,
+    0.375,
+    0.035
+   ],
+   "radius": 0.05,
+   "blend": 0.015,
+   "color": "#2a9d8f"
+  },
+  {
+   "name": "backpack",
+   "type": "box",
+   "at": [
+    0,
+    0.54,
+    -0.15
+   ],
+   "size": [
+    0.21,
+    0.22,
+    0.1
+   ],
+   "round": 0.04,
+   "blend": 0.012,
+   "color": "#c4553a"
+  },
+  {
+   "name": "pocket",
+   "type": "box",
+   "at": [
+    0,
+    0.5,
+    -0.2
+   ],
+   "size": [
+    0.13,
+    0.08,
+    0.03
+   ],
+   "round": 0.012,
+   "blend": 0.006,
+   "color": "#a8432c"
+  },
+  {
+   "name": "beanie",
+   "type": "group",
+   "color": "#2a9d8f",
+   "blend": 0.006,
+   "shapes": [
+    {
+     "name": "dome",
+     "type": "sphere",
+     "at": [
+      0,
+      0.855,
+      -0.012
+     ],
+     "radius": 0.212
+    },
+    {
+     "name": "domecut",
+     "type": "box",
+     "at": [
+      0,
+      0.76,
+      0.02
+     ],
+     "size": [
+      0.6,
+      0.24,
+      0.6
+     ],
+     "rot": [
+      -12,
+      0,
+      0
+     ],
+     "op": "subtract"
+    },
+    {
+     "name": "fold",
+     "type": "torus",
+     "at": [
+      0,
+      0.905,
+      -0.03
+     ],
+     "rot": [
+      -12,
+      0,
+      0
+     ],
+     "radius": 0.192,
+     "thickness": 0.032
+    }
+   ]
+  },
+  {
+   "name": "pompom",
+   "type": "sphere",
+   "at": [
+    0,
+    1.075,
+    -0.04
+   ],
+   "radius": 0.055,
+   "blend": 0.015,
+   "color": "#f4ecd8"
+  },
+  {
+   "name": "cheek",
+   "type": "sphere",
+   "mirror": "x",
+   "at": [
+    0.12,
+    0.78,
+    0.148
+   ],
+   "radius": 0.03,
+   "op": "paint",
+   "blend": 0.01,
+   "color": "#f29e8e"
+  },
+  {
+   "name": "mouth",
+   "type": "capsule",
+   "from": [
+    -0.025,
+    0.772,
+    0.19
+   ],
+   "to": [
+    0.025,
+    0.772,
+    0.19
+   ],
+   "radius": 0.008,
+   "op": "paint",
+   "color": "#7a3b2e"
+  },
+  {
+   "name": "eye",
+   "type": "ellipsoid",
+   "mirror": "x",
+   "at": [
+    0.07,
+    0.83,
+    0.183
+   ],
+   "rot": [
+    0,
+    20,
+    0
+   ],
+   "radii": [
+    0.026,
+    0.032,
+    0.014
+   ],
+   "blend": 0.004,
+   "color": "#1d1d24"
+  },
+  {
+   "name": "glint",
+   "type": "sphere",
+   "mirror": "x",
+   "at": [
+    0.08,
+    0.845,
+    0.195
+   ],
+   "radius": 0.011,
+   "op": "paint",
+   "color": "#ffffff"
+  },
+  {
+   "name": "button",
+   "type": "sphere",
+   "at": [
+    0,
+    0.57,
+    0.132
+   ],
+   "radius": 0.019,
+   "blend": 0.004,
+   "color": "#7a3b2e"
+  },
+  {
+   "name": "button2",
+   "type": "sphere",
+   "at": [
+    0,
+    0.49,
+    0.132
+   ],
+   "radius": 0.019,
+   "blend": 0.004,
+   "color": "#7a3b2e"
+  }
+ ],
+ "res": 0.006
+}

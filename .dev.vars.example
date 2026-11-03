@@ -1,0 +1,3 @@
+# Any long random string. Clients send it as "Authorization: Bearer <RIG_TOKEN>"; it also signs download links.
+# Make one with: openssl rand -hex 32
+RIG_TOKEN=""
