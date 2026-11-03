@@ -243,7 +243,7 @@ export async function handleMcp(req, env, cx = { ns: '', demo: false }) {
             protocolVersion: m.params?.protocolVersion === '2025-03-26' ? '2025-03-26' : PROTOCOL,
             capabilities: { tools: {}, resources: {} },
             serverInfo: { name: 'rig-worker', version: '0.5.0' },
-            instructions: (cx.demo ? 'Public demo: no token, small limits, files are private to your IP and deleted after a day. ' : '') + 'Headless modelling and rigging. To make a character: model (shapes -> closed mesh, patch to refine). Rigging loop: inspect -> preview with a proposed skeleton -> bind -> preview mode weights -> animate -> preview frames + qa -> paint_weights fixes -> export. view shows a file to the user in an interactive 3D viewer. Coordinates are glTF (+Y up, +Z front, +X the character\'s left), metres.',
+            instructions: (cx.demo ? 'Public demo: no token, small limits, files are private to this MCP session (or to your IP without one) and deleted after a day. ' : '') + 'Headless modelling and rigging. To make a character: model (shapes -> closed mesh, patch to refine). Rigging loop: inspect -> preview with a proposed skeleton -> bind -> preview mode weights -> animate -> preview frames + qa -> paint_weights fixes -> export. view shows a file to the user in an interactive 3D viewer. Coordinates are glTF (+Y up, +Z front, +X the character\'s left), metres.',
           });
         case 'ping': return ok(m.id, {});
         case 'resources/list': return ok(m.id, { resources: cx.viewer ? [{ uri: VIEWER_URI, name: 'viewer', title: 'rig-worker 3D viewer', description: 'Interactive 3D viewer for the view tool (MCP Apps)', mimeType: VIEWER_MIME }] : [] });

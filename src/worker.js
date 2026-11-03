@@ -34,9 +34,20 @@ const VIEW_CSP = "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsd
 const signedOk = async (env, p, url) => { const exp = +url.searchParams.get('exp'); return DL_RE.test(p) && exp > Date.now() / 1000 && same(url.searchParams.get('sig') ?? '', await sign(env, p, exp)); };
 const withCors = (r) => { const h = new Headers(r.headers); for (const [k, v] of Object.entries(CORS)) h.set(k, v); return new Response(r.body, { status: r.status, headers: h }); };
 
-// demo: a client's file space is an HMAC of its IP (not reversible without the Worker's secret)
-async function clientNs(env, ip) {
-  return (await sign(env, `ns:${ip}`, 0)).slice(0, 16) + '/';
+// demo: a client's file space is an HMAC of its MCP session, or of its IP without one (not reversible without the
+// Worker's secret). MCP clients get a signed session id on initialize and must send it back on every call; hosts like
+// Claude call from a pool of servers whose IP changes between calls, so the IP alone loses files mid-conversation.
+async function clientNs(env, key) {
+  return (await sign(env, `ns:${key}`, 0)).slice(0, 16) + '/';
+}
+const SID_RE = /^([0-9a-f]{32})\.([0-9a-f]{16})$/;
+async function newSession(env) {
+  const r = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${r}.${(await sign(env, `sid:${r}`, 0)).slice(0, 16)}`;
+}
+async function sessionKey(env, sid) { // the session's random part, or null if the id is not one this Worker issued
+  const m = SID_RE.exec(sid ?? '');
+  return m && same(m[2], (await sign(env, `sid:${m[1]}`, 0)).slice(0, 16)) ? `sid:${m[1]}` : null;
 }
 
 // demo rate limits (Workers rate-limiting bindings; skipped when not bound, e.g. in wrangler dev)
@@ -79,11 +90,22 @@ export default {
     if (demo) {
       if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
       const ip = req.headers.get('cf-connecting-ip') ?? 'local';
-      const why = await limited(env, ip, req);
+      let key = ip, sid = null;
+      const sidIn = req.headers.get('mcp-session-id');
+      if (path === '/mcp' && sidIn) {
+        key = await sessionKey(env, sidIn);
+        // per the MCP spec a 404 tells the client to start a new session
+        if (!key) return withCors(Response.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'unknown session: initialize again' } }, { status: 404 }));
+      } else if (path === '/mcp' && req.method === 'POST') {
+        let m; try { m = await req.clone().json(); } catch {}
+        if ((Array.isArray(m) ? m : [m]).some((x) => x?.method === 'initialize')) { sid = await newSession(env); key = await sessionKey(env, sid); }
+      }
+      const why = await limited(env, key, req);
       if (why) return withCors(Response.json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: why } }, { status: 429, headers: { 'retry-after': '60' } }));
-      cx = { ns: await clientNs(env, ip), demo: true, viewer: VIEWER };
-      const r = await route(req, env, url, path, cx);
-      return withCors(r);
+      cx = { ns: await clientNs(env, key), demo: true, viewer: VIEWER };
+      const r = withCors(await route(req, env, url, path, cx));
+      if (sid) r.headers.set('mcp-session-id', sid);
+      return r;
     }
     // every other call can burn minutes of billed CPU or touch storage: require the shared token
     if (!same(req.headers.get('authorization') ?? '', `Bearer ${env.RIG_TOKEN}`)) return new Response('unauthorized\n', { status: 401, headers: { 'www-authenticate': 'Bearer' } });
