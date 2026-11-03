@@ -25,7 +25,7 @@ const CORS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'access-control-allow-headers': 'content-type, accept, authorization, mcp-protocol-version, mcp-session-id',
-  'access-control-expose-headers': 'mcp-session-id',
+  'access-control-expose-headers': 'mcp-session-id, etag',
   'access-control-max-age': '86400',
 };
 // the viewer page: scripts only from itself and jsDelivr (three.js), data only from this Worker
@@ -72,12 +72,18 @@ export default {
     if (!env.RIG_TOKEN) return new Response('not configured: set the RIG_TOKEN secret\n', { status: 503 });
 
     // signed links work without the token; CORS so the viewer can fetch them from inside an MCP host's sandbox
-    if (req.method === 'GET' && path.startsWith('/dl/')) {
+    // no-cache + ETag: an open viewer polls with HEAD and reloads when the file is saved again under the same name
+    if ((req.method === 'GET' || req.method === 'HEAD') && path.startsWith('/dl/')) {
       const p = path.slice(4);
       if (!(await signedOk(env, p, url))) return new Response('bad or expired link\n', { status: 403, headers: CORS });
+      const meta = await env.FILES.head(`files/${p}`);
+      if (!meta) return new Response('not found\n', { status: 404, headers: CORS });
+      const h = { 'content-type': 'model/gltf-binary', 'content-disposition': `attachment; filename="${DL_RE.exec(p)[2]}"`, 'cache-control': 'no-cache', etag: meta.httpEtag, 'last-modified': meta.uploaded.toUTCString(), ...CORS };
+      const inm = req.headers.get('if-none-match');
+      if (inm && inm.split(',').some((t) => t.trim().replace(/^W\//, '') === meta.httpEtag)) return new Response(null, { status: 304, headers: h });
+      if (req.method === 'HEAD') return new Response(null, { headers: { ...h, 'content-length': String(meta.size) } });
       const o = await env.FILES.get(`files/${p}`);
-      const h = { 'content-type': 'model/gltf-binary', 'content-disposition': `attachment; filename="${DL_RE.exec(p)[2]}"`, 'cache-control': 'private, max-age=300', ...CORS };
-      return o ? new Response(o.body, { headers: h }) : new Response('not found\n', { status: 404, headers: CORS });
+      return o ? new Response(o.body, { headers: { ...h, etag: o.httpEtag } }) : new Response('not found\n', { status: 404, headers: CORS });
     }
     if (req.method === 'GET' && path.startsWith('/view/')) {
       if (!(await signedOk(env, path.slice(6), url))) return new Response('bad or expired link: ask the agent for a new one (view tool)\n', { status: 403 });

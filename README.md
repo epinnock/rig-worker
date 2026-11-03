@@ -31,6 +31,8 @@ On a test creature mesh, the dominant bone of 97.6% of vertices matches Blender 
 
 Ask the agent to show you a model and it calls `view`. In Claude, and other hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview), the viewer opens inside the chat; elsewhere the tool returns a signed `/view/<file>` link that opens the same viewer in a browser. You can orbit and zoom, play or scrub every clip or go to the bind pose, colour the mesh by skin weights (by region, or one bone as a heat map), and turn on the wireframe, skeleton and bounds. The panel lists triangles, bones, size and clips.
 
+The viewer is live. Every open copy of a file, whether inline in the chat or from a link, reloads within a few seconds when the agent saves that file again under the same name. You keep your camera, clip, time and shading. An old link shows the latest version until it expires.
+
 [Try it with Pip](https://epinnock.github.io/rig-worker/viewer/), or drop in any .glb there (it stays in your browser). The viewer is one file, `src/viewer.html`, with three.js from jsDelivr; `npm run docs:viewer` copies it to `docs/viewer/`.
 
 ## Use the public demo
@@ -64,7 +66,7 @@ claude mcp add --transport http rig-worker https://rig-worker.<you>.workers.dev/
   --header "Authorization: Bearer <RIG_TOKEN>"
 ```
 
-Besides `POST /mcp` there is a plain HTTP API: `PUT/GET/DELETE /files/<name>`, `GET /files`, `GET /dl/<name>?exp&sig`, `GET /view/<name>?exp&sig` (the viewer) and `POST /bind` (multipart). The public demo is the same code deployed with `npx wrangler deploy --env demo`; see `wrangler.jsonc`.
+Besides `POST /mcp` there is a plain HTTP API: `PUT/GET/DELETE /files/<name>`, `GET /files`, `GET/HEAD /dl/<name>?exp&sig` (ETag, no-cache), `GET /view/<name>?exp&sig` (the viewer) and `POST /bind` (multipart). The public demo is the same code deployed with `npx wrangler deploy --env demo`; see `wrangler.jsonc`.
 
 ## Develop
 

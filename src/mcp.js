@@ -112,8 +112,8 @@ export const TOOLS = [
     },
   },
   { name: 'get_model', description: 'The model JSON stored in a file made by the model tool (to read before patching).', inputSchema: { type: 'object', required: ['file'], properties: { file } } },
-  { name: 'export', description: 'A download link for a stored file (signed, no header needed), plus a link to the same file in the 3D viewer.', inputSchema: { type: 'object', required: ['file'], properties: { file, expires_minutes: { type: 'integer', minimum: 1, maximum: 10080 } } } },
-  { name: 'view', title: 'View in 3D', description: 'Show a stored file in an interactive 3D viewer for the user: orbit, play and scrub every clip or the bind pose, skin weights by region or per bone, wireframe, skeleton, bounds, numbers. Hosts with MCP Apps (Claude and others) show it inline; the result also has a signed link that opens it in any browser. Use it when the user wants to look at, check or play with a model.',
+  { name: 'export', description: 'A download link for a stored file (signed, no header needed), plus a link to the same file in the 3D viewer. Both links always serve the latest save of the file; an open viewer reloads by itself when it changes.', inputSchema: { type: 'object', required: ['file'], properties: { file, expires_minutes: { type: 'integer', minimum: 1, maximum: 10080 } } } },
+  { name: 'view', title: 'View in 3D', description: 'Show a stored file in an interactive 3D viewer for the user: orbit, play and scrub every clip or the bind pose, skin weights by region or per bone, wireframe, skeleton, bounds, numbers. Hosts with MCP Apps (Claude and others) show it inline; the result also has a signed link that opens it in any browser. Use it when the user wants to look at, check or play with a model. The viewer is live: every open copy of it (inline or via the link) reloads by itself within a few seconds when this file is saved again, keeping the user\'s camera and clip, so to show a change save it under the same name (patch the model, or leave out unset); a new name needs a new view call.',
     inputSchema: { type: 'object', required: ['file'], properties: { file, expires_minutes: { type: 'integer', minimum: 1, maximum: 10080, description: 'how long the link works (default 60)' } } },
     _meta: { ui: { resourceUri: VIEWER_URI } } },
 ];
@@ -183,7 +183,7 @@ async function links(env, cx, a, origin) { // signed download + viewer links for
 }
 
 async function call(env, cx, name, a, origin) {
-  const home = folderOf(cx, a.file ?? a.from); // demo: outputs without a folder go next to their input
+  const home = folderOf(cx, a.file ?? a.from ?? a.out); // demo: outputs without a folder go next to their input
   if (home) cx = { ...cx, ns: home };
   switch (name) {
     case 'list_files': return [text(await listFiles(env, cx))];
@@ -218,7 +218,7 @@ async function call(env, cx, name, a, origin) {
     }
     case 'qa': return [text(T.qa(await load(env, cx, a.file), a))];
     case 'model': {
-      checkName(a.out);
+      resolve(cx, a.out); // throws on a bad name (on the demo it may carry its folder)
       const r = T.model(a, a.model ? null : await load(env, cx, a.from ?? a.out), cx.demo ? DEMO_LIMITS : {});
       const saved = await save(env, cx, a.out, r.doc);
       const res = [text({ ...r.info, ...saved })];
@@ -255,8 +255,8 @@ export async function handleMcp(req, env, cx = { ns: '', demo: false }) {
           return ok(m.id, {
             protocolVersion: m.params?.protocolVersion === '2025-03-26' ? '2025-03-26' : PROTOCOL,
             capabilities: { tools: {}, resources: {} },
-            serverInfo: { name: 'rig-worker', version: '0.5.0' },
-            instructions: (cx.demo ? 'Public demo: no token, small limits, files live in a private folder and are deleted after a day; tools return them as <folder>/<name>, so always pass that full name to later calls. ' : '') + 'Headless modelling and rigging. To make a character: model (shapes -> closed mesh, patch to refine). Rigging loop: inspect -> preview with a proposed skeleton -> bind -> preview mode weights -> animate -> preview frames + qa -> paint_weights fixes -> export. view shows a file to the user in an interactive 3D viewer. Coordinates are glTF (+Y up, +Z front, +X the character\'s left), metres.',
+            serverInfo: { name: 'rig-worker', version: '0.5.1' },
+            instructions: (cx.demo ? 'Public demo: no token, small limits, files live in a private folder and are deleted after a day; tools return them as <folder>/<name>, so always pass that full name to later calls. ' : '') + 'Headless modelling and rigging. To make a character: model (shapes -> closed mesh, patch to refine). Rigging loop: inspect -> preview with a proposed skeleton -> bind -> preview mode weights -> animate -> preview frames + qa -> paint_weights fixes -> export. view shows a file to the user in an interactive 3D viewer that updates live whenever that file is saved again, so keep saving to the same name while the user watches. Coordinates are glTF (+Y up, +Z front, +X the character\'s left), metres.',
           });
         case 'ping': return ok(m.id, {});
         case 'resources/list': return ok(m.id, { resources: cx.viewer ? [{ uri: VIEWER_URI, name: 'viewer', title: 'rig-worker 3D viewer', description: 'Interactive 3D viewer for the view tool (MCP Apps)', mimeType: VIEWER_MIME }] : [] });
