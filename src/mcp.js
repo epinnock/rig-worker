@@ -37,6 +37,9 @@ const skeletonSchema = {
 const ROT_DOC = 'Euler degrees [x, y, z], applied X first, then Y, then Z, about world axes through the joint for bones made by bind (+X character\'s left, +Y up, +Z front), or about the joint\'s own rest axes for rigs made in other tools; right-hand rule. Examples: +X swings a leg back (-X forward); +Y turns toward the character\'s left; +Z raises the left arm (lowers the right one).';
 const poseSchema = { type: 'object', description: `{boneName: [x, y, z]} on top of rest/animation. ${ROT_DOC}`, additionalProperties: vec3 };
 
+export const VIEWER_URI = 'ui://rig-worker/viewer.html';
+const VIEWER_MIME = 'text/html;profile=mcp-app';
+
 export const TOOLS = [
   { name: 'list_files', description: 'List stored GLB files with sizes.', inputSchema: { type: 'object', properties: {} } },
   { name: 'import_url', description: 'Download a GLB from a URL into storage.', inputSchema: { type: 'object', required: ['url', 'name'], properties: { url: { type: 'string' }, name: { type: 'string' } } } },
@@ -109,8 +112,12 @@ export const TOOLS = [
     },
   },
   { name: 'get_model', description: 'The model JSON stored in a file made by the model tool (to read before patching).', inputSchema: { type: 'object', required: ['file'], properties: { file } } },
-  { name: 'export', description: 'A download link for a stored file (signed, no header needed).', inputSchema: { type: 'object', required: ['file'], properties: { file, expires_minutes: { type: 'integer', minimum: 1, maximum: 10080 } } } },
+  { name: 'export', description: 'A download link for a stored file (signed, no header needed), plus a link to the same file in the 3D viewer.', inputSchema: { type: 'object', required: ['file'], properties: { file, expires_minutes: { type: 'integer', minimum: 1, maximum: 10080 } } } },
+  { name: 'view', title: 'View in 3D', description: 'Show a stored file in an interactive 3D viewer for the user: orbit, play and scrub every clip or the bind pose, skin weights by region or per bone, wireframe, skeleton, bounds, numbers. Hosts with MCP Apps (Claude and others) show it inline; the result also has a signed link that opens it in any browser. Use it when the user wants to look at, check or play with a model.',
+    inputSchema: { type: 'object', required: ['file'], properties: { file, expires_minutes: { type: 'integer', minimum: 1, maximum: 10080, description: 'how long the link works (default 60)' } } },
+    _meta: { ui: { resourceUri: VIEWER_URI } } },
 ];
+
 
 const text = (o) => ({ type: 'text', text: typeof o === 'string' ? o : JSON.stringify(o) });
 
@@ -155,6 +162,13 @@ async function save(env, cx, name, doc) {
   await roomFor(env, cx, name);
   await env.FILES.put(key(cx, name), bytes, { httpMetadata: { contentType: 'model/gltf-binary' } });
   return { saved: name, bytes: bytes.length };
+}
+
+async function links(env, cx, a, origin) { // signed download + viewer links for a stored file
+  if (!(await env.FILES.head(key(cx, a.file)))) throw new Error(`no file ${a.file}`);
+  const mins = Math.min(a.expires_minutes ?? 60, cx.demo ? DEMO_LIMITS.maxExpiresMinutes : 10080);
+  const exp = Math.floor(Date.now() / 1000) + 60 * mins, path = `${cx.ns}${a.file}`, q = `?exp=${exp}&sig=${await sign(env, path, exp)}`;
+  return { glb: `${origin}/dl/${path}${q}`, view: `${origin}/view/${path}${q}`, expires: new Date(exp * 1000).toISOString() };
 }
 
 async function call(env, cx, name, a, origin) {
@@ -203,10 +217,12 @@ async function call(env, cx, name, a, origin) {
     }
     case 'get_model': return [text(T.getModel(await load(env, cx, a.file)))];
     case 'export': {
-      if (!(await env.FILES.head(key(cx, a.file)))) throw new Error(`no file ${a.file}`);
-      const mins = Math.min(a.expires_minutes ?? 60, cx.demo ? DEMO_LIMITS.maxExpiresMinutes : 10080);
-      const exp = Math.floor(Date.now() / 1000) + 60 * mins, path = `${cx.ns}${a.file}`;
-      return [text({ url: `${origin}/dl/${path}?exp=${exp}&sig=${await sign(env, path, exp)}`, expires: new Date(exp * 1000).toISOString() })];
+      const l = await links(env, cx, a, origin);
+      return [text({ url: l.glb, view: l.view, expires: l.expires })];
+    }
+    case 'view': {
+      const l = await links(env, cx, a, origin);
+      return { content: [text({ file: a.file, ...l, note: 'shown in the viewer if this host supports MCP Apps; otherwise give the user the view link' })], structuredContent: { file: a.file, ...l } };
     }
     default: throw Object.assign(new Error(`unknown tool ${name}`), { rpc: -32602 });
   }
@@ -225,14 +241,20 @@ export async function handleMcp(req, env, cx = { ns: '', demo: false }) {
         case 'initialize':
           return ok(m.id, {
             protocolVersion: m.params?.protocolVersion === '2025-03-26' ? '2025-03-26' : PROTOCOL,
-            capabilities: { tools: {} },
-            serverInfo: { name: 'rig-worker', version: '0.4.0' },
-            instructions: (cx.demo ? 'Public demo: no token, small limits, files are private to your IP and deleted after a day. ' : '') + 'Headless modelling and rigging. To make a character: model (shapes -> closed mesh, patch to refine). Rigging loop: inspect -> preview with a proposed skeleton -> bind -> preview mode weights -> animate -> preview frames + qa -> paint_weights fixes -> export. Coordinates are glTF (+Y up, +Z front, +X the character\'s left), metres.',
+            capabilities: { tools: {}, resources: {} },
+            serverInfo: { name: 'rig-worker', version: '0.5.0' },
+            instructions: (cx.demo ? 'Public demo: no token, small limits, files are private to your IP and deleted after a day. ' : '') + 'Headless modelling and rigging. To make a character: model (shapes -> closed mesh, patch to refine). Rigging loop: inspect -> preview with a proposed skeleton -> bind -> preview mode weights -> animate -> preview frames + qa -> paint_weights fixes -> export. view shows a file to the user in an interactive 3D viewer. Coordinates are glTF (+Y up, +Z front, +X the character\'s left), metres.',
           });
         case 'ping': return ok(m.id, {});
+        case 'resources/list': return ok(m.id, { resources: cx.viewer ? [{ uri: VIEWER_URI, name: 'viewer', title: 'rig-worker 3D viewer', description: 'Interactive 3D viewer for the view tool (MCP Apps)', mimeType: VIEWER_MIME }] : [] });
+        case 'resources/templates/list': return ok(m.id, { resourceTemplates: [] });
+        case 'resources/read':
+          if (m.params?.uri !== VIEWER_URI || !cx.viewer) return err(m.id, -32002, `resource not found: ${m.params?.uri}`);
+          return ok(m.id, { contents: [{ uri: VIEWER_URI, mimeType: VIEWER_MIME, text: cx.viewer,
+            _meta: { ui: { csp: { connectDomains: [origin], resourceDomains: ['https://cdn.jsdelivr.net'] }, prefersBorder: true } } }] });
         case 'tools/list': return ok(m.id, { tools: cx.demo ? TOOLS.filter((t) => t.name !== 'import_url') : TOOLS });
         case 'tools/call':
-          try { return ok(m.id, { content: await call(env, cx, m.params?.name, m.params?.arguments ?? {}, origin) }); }
+          try { const r = await call(env, cx, m.params?.name, m.params?.arguments ?? {}, origin); return ok(m.id, Array.isArray(r) ? { content: r } : r); }
           catch (e) { if (e.rpc) throw e; return ok(m.id, { content: [text(`error: ${e.message}`)], isError: true }); }
         default: return err(m.id, -32601, `method not found: ${m.method}`);
       }

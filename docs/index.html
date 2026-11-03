@@ -77,6 +77,14 @@ pre .c { color: #8b8f9c; } pre .k { color: #f2b134; } pre .s { color: #8fd4c9; }
 .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .btn:hover { transform: translateY(-1px); }
 .facts { display: flex; flex-wrap: wrap; gap: 8px 22px; color: var(--ink3); font-size: 14px; }
+.blendok { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; text-decoration: none; color: var(--ink2); background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--teal); border-radius: 12px; padding: 10px 14px; margin: 0 0 22px; font-size: 14.5px; line-height: 1.5; box-shadow: var(--shadow); }
+.blendok b { color: var(--teal); font-weight: 700; white-space: nowrap; }
+.blendok span { flex: 1 1 260px; }
+.blendok:hover { border-color: var(--teal); }
+.facts a { color: inherit; }
+.viewerbox { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--stage); box-shadow: var(--shadow); margin: 8px 0 10px; }
+.viewerbox iframe { display: block; width: 100%; height: 600px; border: 0; }
+@media (max-width: 600px) { .viewerbox iframe { height: 940px; } }
 .facts span::before { content: "●"; color: var(--teal); margin-right: 7px; font-size: 10px; vertical-align: 2px; }
 .stage { position: relative; aspect-ratio: 1 / 1; border-radius: 22px; background: radial-gradient(120% 90% at 50% 20%, #3b3f4c, var(--stage) 70%); box-shadow: var(--shadow); overflow: hidden; border: 1px solid var(--line); }
 .stage model-viewer { width: 100%; height: 100%; --poster-color: transparent; }
@@ -144,7 +152,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: 
   <div class="wrap">
     <a class="brand" href="#"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="11" r="8" fill="#f2b134"/><path d="M16 19v8M16 23l-6 5M16 23l6 5" stroke="#2a9d8f" stroke-width="3" stroke-linecap="round" fill="none"/></svg>rig-worker</a>
     <nav>
-      <a href="#connect">Connect</a><a href="#pipeline">Pipeline</a><a href="#playground">Playground</a><a href="#tools">Tools</a><a href="#modelling">Modelling</a><a href="#rigging">Rigging</a><a href="#self-host">Self-host</a><a href="#blender">Blender</a>
+      <a href="#connect">Connect</a><a href="#pipeline">Pipeline</a><a href="#playground">Playground</a><a href="#tools">Tools</a><a href="#viewer">Viewer</a><a href="#modelling">Modelling</a><a href="#rigging">Rigging</a><a href="#self-host">Self-host</a><a href="#blender">Blender</a>
       <a href="https://github.com/epinnock/rig-worker">GitHub</a>
     </nav>
     <button class="theme" id="theme" aria-label="Switch light or dark theme" title="Light / dark">◐</button>
@@ -154,15 +162,16 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: 
 <div class="hero">
   <div class="wrap">
     <div>
-      <div class="eyebrow"><b>MCP</b> 13 tools · pure JavaScript · MIT</div>
+      <div class="eyebrow"><b>MCP</b> 14 tools · pure JavaScript · MIT</div>
       <h1>Agents that <em>model, rig and animate</em> 3D characters.</h1>
-      <p class="lede">rig-worker is an MCP server in a single Cloudflare Worker. An agent describes a character as simple shapes, gets back one closed mesh, places bones, binds them with automatic weights, keys a walk, and checks every step with rendered pictures and numbers. No Blender, no GPU, no install.</p>
+      <p class="lede">rig-worker is an MCP server in a single Cloudflare Worker. An agent describes a character as simple shapes, gets back one closed mesh, places bones, binds them with automatic weights, keys a walk, and checks every step with rendered pictures and numbers. It needs no Blender, no GPU and no install, yet everything it makes opens in Blender as it was built.</p>
+      <a class="blendok" href="#blender"><b>✓ Blender compatible</b><span>Mesh, colours, bones, weights and every clip import into Blender 4.5 with default settings, and come back the same. Checked by a round-trip test.</span></a>
       <div class="ctas">
         <a class="btn primary" href="#connect">Try the public MCP</a>
         <a class="btn" href="https://deploy.workers.cloudflare.com/?url=https://github.com/epinnock/rig-worker">Deploy your own</a>
         <a class="btn" href="https://github.com/epinnock/rig-worker">GitHub ↗</a>
       </div>
-      <div class="facts"><span>glTF in, glTF out</span><span>bone heat like Blender's Automatic Weights</span><span>pictures for the agent at every step</span></div>
+      <div class="facts"><span>glTF in, glTF out</span><span><a href="#viewer">3D viewer inline in Claude</a></span><span>bone heat like Blender's Automatic Weights</span><span>pictures for the agent at every step</span></div>
     </div>
     <div class="stage">
       <model-viewer src="assets/pip.glb" alt="Pip, a toy explorer in a raincoat, walking" autoplay camera-controls disable-zoom touch-action="pan-y" camera-orbit="32deg 78deg 2.6m" camera-target="0m 0.52m 0m" field-of-view="26deg" exposure="1.05" shadow-intensity="0.9" shadow-softness="0.8" environment-image="neutral" interaction-prompt="none" loading="eager">
@@ -293,7 +302,7 @@ node examples/pip/run.mjs            <span class="c"># model -> bind -> walk -> 
 <section id="tools">
   <div class="wrap">
     <div class="kicker">Reference</div>
-    <h2>The 13 tools</h2>
+    <h2>The 14 tools</h2>
     <p class="intro">Files are GLBs in the Worker's R2 bucket, named with letters, digits, <code>.</code> <code>_</code> <code>-</code>. Tools that change a file take <code>out</code> to save under a new name (default: overwrite). The full JSON schemas come from <code>tools/list</code>.</p>
     <div class="tbl"><table>
       <thead><tr><th>Tool</th><th>What it does</th><th>Key arguments</th></tr></thead>
@@ -307,7 +316,8 @@ node examples/pip/run.mjs            <span class="c"># model -> bind -> walk -> 
         <tr><td><code>paint_weights</code></td><td>Set, add or scale one bone's weight in a sphere or box; other bones keep their proportions; top 4, normalised.</td><td><code>bone</code>, <code>region</code>, <code>op</code>, <code>value</code>, <code>falloff</code></td></tr>
         <tr><td><code>animate</code></td><td>Writes or replaces a keyframed clip: rotations per bone, offsets for the root.</td><td><code>name</code>, <code>duration</code>, <code>loop</code>, <code>interpolation</code>, <code>tracks [{bone, keys [{t, rot, move}]}]</code></td></tr>
         <tr><td><code>qa</code></td><td>Samples a clip or pose: frames below the rest-pose floor, edges past a length ratio, hotspots with <code>restBox</code>, <code>surfacePoint</code> and flagged <code>points</code>.</td><td><code>animation</code> or <code>pose</code>, <code>frames</code>, <code>stretch</code>, <code>sinkTolerance</code></td></tr>
-        <tr><td><code>export</code></td><td>A signed download link (no header needed).</td><td><code>file</code>, <code>expires_minutes</code></td></tr>
+        <tr><td><code>export</code></td><td>A signed download link (no header needed), plus a link to the file in the 3D viewer.</td><td><code>file</code>, <code>expires_minutes</code></td></tr>
+        <tr><td><code>view</code></td><td>Shows a file to the user in the interactive <a href="#viewer">3D viewer</a>: inline in hosts with MCP Apps (Claude and others), and as a signed link for any browser.</td><td><code>file</code>, <code>expires_minutes</code></td></tr>
         <tr><td><code>list_files</code></td><td>Stored files with sizes.</td><td></td></tr>
         <tr><td><code>delete_file</code></td><td>Delete a stored file.</td><td><code>file</code></td></tr>
         <tr><td><code>import_url</code></td><td>Fetch a GLB from a URL into storage (self-hosted only).</td><td><code>url</code>, <code>name</code></td></tr>
@@ -319,6 +329,24 @@ node examples/pip/run.mjs            <span class="c"># model -> bind -> walk -> 
       <li><b>Rotations:</b> Euler degrees <code>[x, y, z]</code>, applied X, then Y, then Z, about the world axes through the joint for bones <code>bind</code> made (+X swings a leg back, +Y turns toward the character's left, +Z raises the left arm), and about the joint's own rest axes for rigs made elsewhere. The bones themselves are stored pointing along the limb, as Blender expects.</li>
       <li><b>Views:</b> azimuth degrees, 0 = front, 90 = the character's left side. The default camera frames the rest-pose bounds and stays the same between calls, so pictures compare.</li>
     </ul>
+  </div>
+</section>
+
+<section id="viewer">
+  <div class="wrap">
+    <div class="kicker">See it in 3D</div>
+    <h2>A viewer the agent can hand you</h2>
+    <p class="intro">Ask the agent to show you a model and it calls <code>view</code>. In Claude, and in other hosts that support <a href="https://modelcontextprotocol.io/extensions/apps/overview">MCP Apps</a>, the viewer opens right in the chat. Everywhere else the tool returns a signed link that opens the same viewer in a browser for an hour (up to a week on a self-hosted Worker). Orbit and zoom, play or scrub every clip or go to the bind pose, colour the mesh by skin weights (by region, or one bone as a heat map), and turn on the wireframe, skeleton and bounds. The panel lists triangles, bones, size and every clip.</p>
+    <div class="viewerbox"><iframe src="viewer/?src=../assets/pip.glb" title="rig-worker 3D viewer showing Pip" loading="lazy" allow="fullscreen"></iframe></div>
+    <p class="meta">Pip as the demo makes it. <a href="viewer/">Open the viewer on its own page</a> and drop in any .glb; the file stays in your browser.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Where</th><th>How</th></tr></thead>
+      <tbody>
+        <tr><td>Claude, MCP Apps hosts</td><td><code>view</code> carries <code>_meta.ui.resourceUri = ui://rig-worker/viewer.html</code>; the host renders that resource and passes it the tool result, a signed GLB link on this Worker.</td></tr>
+        <tr><td>Any browser</td><td>The <code>view</code> link, <code>/view/&lt;file&gt;?exp&amp;sig</code>, which <code>export</code> also returns. No token needed until the link expires.</td></tr>
+        <tr><td>Your own page</td><td><code>viewer/?src=&lt;url of a .glb&gt;</code> on this site (the server needs CORS), or copy <code>src/viewer.html</code>: one file, with three.js from jsDelivr.</td></tr>
+      </tbody>
+    </table></div>
   </div>
 </section>
 
@@ -430,7 +458,8 @@ RIG_TOKEN=... node examples/pip/run.mjs http://127.0.0.1:8799</code></pre>
         <tr><td><code>POST /mcp</code></td><td>MCP Streamable HTTP (stateless JSON responses, protocol 2025-06-18)</td></tr>
         <tr><td><code>PUT /files/&lt;name&gt;</code></td><td>Upload a GLB (body = bytes, max 64 MB; 8 MB on the demo)</td></tr>
         <tr><td><code>GET /files</code>, <code>GET|DELETE /files/&lt;name&gt;</code></td><td>List, download, delete</td></tr>
-        <tr><td><code>GET /dl/&lt;name&gt;?exp&amp;sig</code></td><td>Signed download from <code>export</code>, no header</td></tr>
+        <tr><td><code>GET /dl/&lt;name&gt;?exp&amp;sig</code></td><td>Signed download from <code>export</code> or <code>view</code>, no header</td></tr>
+        <tr><td><code>GET /view/&lt;name&gt;?exp&amp;sig</code></td><td>The same file in the 3D viewer, no header</td></tr>
         <tr><td><code>POST /bind</code></td><td>Multipart <code>glb</code> + <code>skeleton</code> (+ <code>opts</code>) → rigged GLB, stats in <code>x-rig-stats</code> (self-hosted only)</td></tr>
       </tbody>
     </table></div>
