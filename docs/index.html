@@ -337,13 +337,14 @@ node examples/pip/run.mjs            <span class="c"># model -> bind -> walk -> 
     <div class="kicker">See it in 3D</div>
     <h2>A viewer the agent can hand you</h2>
     <p class="intro">Ask the agent to show you a model and it calls <code>view</code>. In Claude, and in other hosts that support <a href="https://modelcontextprotocol.io/extensions/apps/overview">MCP Apps</a>, the viewer opens right in the chat. Everywhere else the tool returns a signed link that opens the same viewer in a browser for an hour (up to a week on a self-hosted Worker). Orbit and zoom, play or scrub every clip or go to the bind pose, colour the mesh by skin weights (by region, or one bone as a heat map), and turn on the wireframe, skeleton and bounds. The panel lists triangles, bones, size and every clip.</p>
+    <p class="intro">It is live. Every open copy of a file, inline or from a link, reloads within a few seconds when the agent saves that file again under the same name. You keep your camera, clip, time and shading. An old link shows the latest version until it expires.</p>
     <div class="viewerbox"><iframe src="viewer/?src=../assets/pip.glb" title="rig-worker 3D viewer showing Pip" loading="lazy" allow="fullscreen"></iframe></div>
     <p class="meta">Pip as the demo makes it. <a href="viewer/">Open the viewer on its own page</a> and drop in any .glb; the file stays in your browser.</p>
     <div class="tbl"><table>
       <thead><tr><th>Where</th><th>How</th></tr></thead>
       <tbody>
         <tr><td>Claude, MCP Apps hosts</td><td><code>view</code> carries <code>_meta.ui.resourceUri = ui://rig-worker/viewer.html</code>; the host renders that resource and passes it the tool result, a signed GLB link on this Worker.</td></tr>
-        <tr><td>Any browser</td><td>The <code>view</code> link, <code>/view/&lt;file&gt;?exp&amp;sig</code>, which <code>export</code> also returns. No token needed until the link expires.</td></tr>
+        <tr><td>Any browser</td><td>The <code>view</code> link, <code>/view/&lt;file&gt;?exp&amp;sig</code>, which <code>export</code> also returns. No token needed until the link expires. The page checks the file's ETag every 2 s (every 15 s after 10 quiet minutes, paused in a hidden tab) and reloads in place when it changes.</td></tr>
         <tr><td>Your own page</td><td><code>viewer/?src=&lt;url of a .glb&gt;</code> on this site (the server needs CORS), or copy <code>src/viewer.html</code>: one file, with three.js from jsDelivr.</td></tr>
       </tbody>
     </table></div>
@@ -458,7 +459,7 @@ RIG_TOKEN=... node examples/pip/run.mjs http://127.0.0.1:8799</code></pre>
         <tr><td><code>POST /mcp</code></td><td>MCP Streamable HTTP (stateless JSON responses, protocol 2025-06-18)</td></tr>
         <tr><td><code>PUT /files/&lt;name&gt;</code></td><td>Upload a GLB (body = bytes, max 64 MB; 8 MB on the demo)</td></tr>
         <tr><td><code>GET /files</code>, <code>GET|DELETE /files/&lt;name&gt;</code></td><td>List, download, delete</td></tr>
-        <tr><td><code>GET /dl/&lt;name&gt;?exp&amp;sig</code></td><td>Signed download from <code>export</code> or <code>view</code>, no header</td></tr>
+        <tr><td><code>GET/HEAD /dl/&lt;name&gt;?exp&amp;sig</code></td><td>Signed download from <code>export</code> or <code>view</code>, no header. Sends an ETag with <code>no-cache</code> and answers <code>If-None-Match</code> with 304, so a link always serves the latest save</td></tr>
         <tr><td><code>GET /view/&lt;name&gt;?exp&amp;sig</code></td><td>The same file in the 3D viewer, no header</td></tr>
         <tr><td><code>POST /bind</code></td><td>Multipart <code>glb</code> + <code>skeleton</code> (+ <code>opts</code>) → rigged GLB, stats in <code>x-rig-stats</code> (self-hosted only)</td></tr>
       </tbody>

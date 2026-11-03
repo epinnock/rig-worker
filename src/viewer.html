@@ -46,6 +46,8 @@ body.embedded #app { height: 560px; min-height: 0; }
 #corner { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
 #corner button { background: var(--hud); color: #f4efe4; border: 0; border-radius: 7px; width: 30px; height: 28px; cursor: pointer; font-size: 14px; }
 #corner button:hover { filter: brightness(1.25); }
+#live { position: absolute; right: 10px; bottom: 10px; background: var(--hud); color: #f4efe4; border-radius: 7px; padding: 3px 8px; font: 12px ui-monospace, "SF Mono", Menlo, monospace; pointer-events: none; transition: opacity .4s; }
+#live.flash { background: #2f8f5b; }
 #msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--ink2); font-size: 14px; }
 #msg[hidden] { display: none; }
 #msg .spin { width: 22px; height: 22px; border: 2.5px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 0 auto 10px; animation: r .8s linear infinite; }
@@ -106,6 +108,7 @@ kbd { font: 11px ui-monospace, Menlo, monospace; background: var(--chip); border
       <button id="reset" title="Reset view (0)" aria-label="Reset view">⟲</button>
     </div>
     <div id="hud" hidden></div>
+    <div id="live" hidden></div>
     <div id="msg"><div><div class="spin"></div><span id="msgTxt">starting the viewer…</span></div></div>
     <div id="drop">drop a .glb to open it</div>
   </div>
@@ -199,7 +202,7 @@ function applyHostContext(c) {
 function fromResult(r) { // a CallToolResult from the view (or export) tool
   const s = r?.structuredContent ?? (() => { for (const c of r?.content ?? []) if (c.type === 'text') try { return JSON.parse(c.text); } catch {} })();
   if (r?.isError || !s?.glb) { msg(r?.content?.find((c) => c.type === 'text')?.text ?? 'the tool returned no model link', true); return; }
-  loadUrl(s.glb, s.file ?? s.glb.split('?')[0].split('/').pop());
+  loadUrl(s.glb, (s.file ?? s.glb.split('?')[0]).split('/').pop());
 }
 window.addEventListener('message', (e) => {
   if (e.source !== window.parent) return;
@@ -230,7 +233,7 @@ async function start() {
   if (viewPath && q.get('sig')) return loadUrl(`${location.origin}/dl/${viewPath[1]}${location.search}`, decodeURIComponent(viewPath[1].split('/').pop()));
   if (inFrame) {
     try {
-      const r = await hostRequest('ui/initialize', { protocolVersion: '2026-01-26', appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] }, capabilities: {}, clientInfo: { name: 'rig-worker viewer', version: '0.5.0' } });
+      const r = await hostRequest('ui/initialize', { protocolVersion: '2026-01-26', appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] }, capabilities: {}, clientInfo: { name: 'rig-worker viewer', version: '0.5.1' } });
       mcp = true; hostCaps = r?.hostCapabilities ?? {};
       document.body.classList.add('embedded');
       const modes = r?.hostContext?.availableDisplayModes ?? hostCaps.availableDisplayModes;
@@ -313,15 +316,69 @@ function setTitle(name, extra = '') { $('title').innerHTML = ''; $('title').appe
 
 async function loadUrl(url, name) {
   setTitle(name); msg(`loading ${name}…`);
+  stopWatch();
   try {
-    const r = await fetch(url);
+    const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status === 403 ? 'this link has expired; ask for a new one (view or export tool)' : `download failed (${r.status})`);
+    const tag = r.headers.get('etag');
     await loadBuffer(await r.arrayBuffer(), name);
+    watch(url, name, tag);
   } catch (e) { msg(`${e.message}`, true); }
 }
-async function loadBuffer(buf, name) {
-  msg(`opening ${name}…`);
+
+// ---------- live reload: when the file is saved again under the same name, every open viewer of it updates ----------
+const live = { url: null, name: '', tag: null, timer: 0, since: 0, busy: false, gen: 0 };
+function stopWatch() { clearTimeout(live.timer); live.url = null; live.gen++; $('live').hidden = true; }
+function watch(url, name, tag) {
+  const exp = +new URL(url, location.href).searchParams.get('exp');
+  const u = new URL(url, location.href);
+  if (!tag || !/^https?:/.test(u.protocol) || !u.searchParams.get('sig')) return; // only signed rig-worker links can change; a local or static file has nothing to watch
+  Object.assign(live, { url, name, tag, since: Date.now(), exp: exp ? exp * 1000 : Infinity });
+  liveNote('live', false);
+  schedule();
+}
+function liveNote(text, flash) {
+  const l = $('live'); l.hidden = false; l.textContent = text === 'live' ? '● live' : text; l.title = 'reloads by itself when the file is saved again';
+  l.classList.toggle('flash', flash);
+  if (flash) setTimeout(() => { l.classList.remove('flash'); l.textContent = '● live'; }, 2500);
+}
+function schedule() { // every 2 s at first, every 15 s after 10 quiet minutes; paused while the tab is hidden
+  clearTimeout(live.timer);
+  if (!live.url) return;
+  const quiet = Date.now() - live.since;
+  live.timer = setTimeout(poll, quiet < 10 * 60e3 ? 2000 : 15000);
+}
+async function poll() {
+  const gen = live.gen;
+  if (!live.url || live.busy) return schedule();
+  if (Date.now() > live.exp) { liveNote('link expired: no more updates', false); live.url = null; return; }
+  if (document.hidden) return schedule();
+  live.busy = true;
+  try {
+    const r = await fetch(live.url, { method: 'HEAD', cache: 'no-store' });
+    const tag = r.headers.get('etag');
+    if (gen !== live.gen) return;
+    if (r.status === 403) { liveNote('link expired: no more updates', false); live.url = null; return; }
+    if (r.ok && tag && tag !== live.tag) {
+      const g = await fetch(live.url, { cache: 'no-store' });
+      if (!g.ok || gen !== live.gen) return;
+      const buf = await g.arrayBuffer();
+      if (gen !== live.gen) return;
+      await loadBuffer(buf, live.name, true);
+      live.tag = g.headers.get('etag') ?? tag; live.since = Date.now();
+      liveNote(`updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`, true);
+      live.count = (live.count ?? 0) + 1; window.__viewer.updates = live.count;
+    }
+  } catch { /* offline for a moment: try again later */ }
+  finally { live.busy = false; if (gen === live.gen) schedule(); }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && live.url) { clearTimeout(live.timer); poll(); } });
+
+async function loadBuffer(buf, name, keep = false) {
+  if (!keep) { stopWatch(); msg(`opening ${name}…`); }
   const gltf = await new GLTFLoader().parseAsync(buf, '');
+  // a reload keeps what the user was looking at: camera, clip and time, play state, chosen bone
+  const prev = keep && model ? { pos: camera.position.clone(), target: controls.target.clone(), clip: $('clip').value, t: action?.time ?? 0, bone: bones[+$('bone').value]?.userData.label ?? null } : null;
   dispose();
   const root = gltf.scene;
   let hidden = 0;
@@ -370,21 +427,24 @@ async function loadBuffer(buf, name) {
   document.querySelector('#modes [data-id="weights"]').disabled = !skinned.length;
   if (!skinned.length && mode === 'weights') mode = 'lit';
   fillBones();
+  if (prev?.bone != null) { const i = bones.findIndex((b) => b.userData.label === prev.bone); if (i >= 0) $('bone').value = String(i); }
 
   clips = gltf.animations;
   if (clips.length) mixer = new THREE.AnimationMixer(root);
   const sel = $('clip'); sel.innerHTML = '';
   const add = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.append(o); };
   if (!clips.length) { add('', 'no clips'); sel.disabled = true; }
-  else { sel.disabled = false; add(BIND, 'bind pose'); for (const c of clips) add(c.name, `${c.name}  ·  ${c.duration.toFixed(2)} s`); sel.value = clips[0].name; }
+  else { sel.disabled = false; add(BIND, 'bind pose'); for (const c of clips) add(c.name, `${c.name}  ·  ${c.duration.toFixed(2)} s`); sel.value = prev && (prev.clip === BIND || clips.some((c) => c.name === prev.clip)) ? prev.clip : clips[0].name; }
   playClip(sel.value);
+  if (prev && action) { action.time = Math.min(prev.t, action.getClip().duration); mixer.update(0); updateTime(); }
   setMode(mode);
   wireUp($('wire').checked);
   fillInfo(buf.byteLength, gltf, hidden);
   setTitle(name, `${fmtM(size.y)} tall${bones.length ? ` · ${bones.length} bones` : ''}${clips.length ? ` · ${clips.length} clip${clips.length > 1 ? 's' : ''}` : ''}`);
-  setView(view);
+  if (prev) { camera.position.copy(prev.pos); controls.target.copy(prev.target); controls.minDistance = radius * 0.2; controls.maxDistance = radius * 20; controls.update(); }
+  else setView(view);
   msg('');
-  window.__viewer = { ready: true, name, clips: clips.map((c) => c.name), bones: bones.length };
+  window.__viewer = { ready: true, name, clips: clips.map((c) => c.name), bones: bones.length, updates: live.count ?? 0, cam: () => camera.position.toArray().map((n) => +n.toFixed(3)) };
 }
 const niceCell = (x) => { const p = 10 ** Math.floor(Math.log10(x)), f = x / p; return (f < 2 ? 1 : f < 5 ? 2 : 5) * p; };
 const fmtM = (m) => m >= 1 ? `${m.toFixed(2)} m` : m >= 0.01 ? `${(m * 100).toFixed(1)} cm` : `${(m * 1000).toFixed(1)} mm`;
