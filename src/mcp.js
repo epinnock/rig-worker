@@ -17,7 +17,7 @@ export const DEMO_LIMITS = {
 };
 
 const vec3 = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 };
-const file = { type: 'string', description: 'file name in storage (see list_files)' };
+const file = { type: 'string', description: 'file name in storage, exactly as a tool returned it (on the public demo that includes its folder, e.g. 0123456789abcdef/robot.glb)' };
 const out = { type: 'string', description: 'name to save the result as (default: overwrite file)' };
 const skeletonSchema = {
   type: 'object', required: ['bones'],
@@ -135,7 +135,18 @@ export async function sign(env, name, exp) {
 
 const checkName = (n) => { if (!NAME_RE.test(n ?? '')) throw new Error(`bad file name ${JSON.stringify(n)} (letters, digits, . _ -)`); return n; };
 
-const key = (cx, name) => `files/${cx.ns}${checkName(name)}`;
+// The public demo keeps each client's files in a private folder (an unguessable 16-hex id). Tools return demo files
+// as "<folder>/<name>" and accept that full name from any later call: hosts like Claude call from servers whose IP and
+// MCP session change mid-conversation, so the caller alone can't find the folder again. A bare name means the caller's
+// own folder; an output without a folder goes next to its input.
+const QUAL_RE = /^([0-9a-f]{16})\/([A-Za-z0-9._-]{1,120})$/;
+export function resolve(cx, name) {
+  const m = cx.demo ? QUAL_RE.exec(name ?? '') : null;
+  const ns = m ? `${m[1]}/` : cx.ns, base = m ? m[2] : checkName(name);
+  return { ns, base, k: `files/${ns}${base}`, full: `${ns}${base}` };
+}
+const key = (cx, name) => resolve(cx, name).k;
+const folderOf = (cx, name) => (cx.demo && QUAL_RE.test(name ?? '') ? resolve(cx, name).ns : null);
 
 function vertexCount(doc) {
   let n = 0;
@@ -151,27 +162,29 @@ async function load(env, cx, name) {
 }
 export async function listFiles(env, cx) {
   const p = `files/${cx.ns}`, l = await env.FILES.list({ prefix: p });
-  return l.objects.map((o) => ({ name: o.key.slice(p.length), bytes: o.size, uploaded: o.uploaded }));
+  return l.objects.map((o) => ({ name: (cx.demo ? cx.ns : '') + o.key.slice(p.length), bytes: o.size, uploaded: o.uploaded }));
 }
 export async function roomFor(env, cx, name) { // demo: cap the number of files per client
   if (!cx.demo || (await env.FILES.head(key(cx, name)))) return;
-  if ((await listFiles(env, cx)).length >= DEMO_LIMITS.maxFiles) throw new Error(`the public demo keeps at most ${DEMO_LIMITS.maxFiles} files per client; delete_file some first`);
+  if ((await listFiles(env, { ...cx, ns: resolve(cx, name).ns })).length >= DEMO_LIMITS.maxFiles) throw new Error(`the public demo keeps at most ${DEMO_LIMITS.maxFiles} files per client; delete_file some first`);
 }
 async function save(env, cx, name, doc) {
   const bytes = await writeGLB(doc);
   await roomFor(env, cx, name);
   await env.FILES.put(key(cx, name), bytes, { httpMetadata: { contentType: 'model/gltf-binary' } });
-  return { saved: name, bytes: bytes.length };
+  return cx.demo ? { saved: resolve(cx, name).full, bytes: bytes.length, note: 'pass this full name (with its folder) to later calls' } : { saved: name, bytes: bytes.length };
 }
 
 async function links(env, cx, a, origin) { // signed download + viewer links for a stored file
   if (!(await env.FILES.head(key(cx, a.file)))) throw new Error(`no file ${a.file}`);
   const mins = Math.min(a.expires_minutes ?? 60, cx.demo ? DEMO_LIMITS.maxExpiresMinutes : 10080);
-  const exp = Math.floor(Date.now() / 1000) + 60 * mins, path = `${cx.ns}${a.file}`, q = `?exp=${exp}&sig=${await sign(env, path, exp)}`;
+  const exp = Math.floor(Date.now() / 1000) + 60 * mins, path = resolve(cx, a.file).full, q = `?exp=${exp}&sig=${await sign(env, path, exp)}`;
   return { glb: `${origin}/dl/${path}${q}`, view: `${origin}/view/${path}${q}`, expires: new Date(exp * 1000).toISOString() };
 }
 
 async function call(env, cx, name, a, origin) {
+  const home = folderOf(cx, a.file ?? a.from); // demo: outputs without a folder go next to their input
+  if (home) cx = { ...cx, ns: home };
   switch (name) {
     case 'list_files': return [text(await listFiles(env, cx))];
     case 'import_url': {
@@ -243,7 +256,7 @@ export async function handleMcp(req, env, cx = { ns: '', demo: false }) {
             protocolVersion: m.params?.protocolVersion === '2025-03-26' ? '2025-03-26' : PROTOCOL,
             capabilities: { tools: {}, resources: {} },
             serverInfo: { name: 'rig-worker', version: '0.5.0' },
-            instructions: (cx.demo ? 'Public demo: no token, small limits, files are private to this MCP session (or to your IP without one) and deleted after a day. ' : '') + 'Headless modelling and rigging. To make a character: model (shapes -> closed mesh, patch to refine). Rigging loop: inspect -> preview with a proposed skeleton -> bind -> preview mode weights -> animate -> preview frames + qa -> paint_weights fixes -> export. view shows a file to the user in an interactive 3D viewer. Coordinates are glTF (+Y up, +Z front, +X the character\'s left), metres.',
+            instructions: (cx.demo ? 'Public demo: no token, small limits, files live in a private folder and are deleted after a day; tools return them as <folder>/<name>, so always pass that full name to later calls. ' : '') + 'Headless modelling and rigging. To make a character: model (shapes -> closed mesh, patch to refine). Rigging loop: inspect -> preview with a proposed skeleton -> bind -> preview mode weights -> animate -> preview frames + qa -> paint_weights fixes -> export. view shows a file to the user in an interactive 3D viewer. Coordinates are glTF (+Y up, +Z front, +X the character\'s left), metres.',
           });
         case 'ping': return ok(m.id, {});
         case 'resources/list': return ok(m.id, { resources: cx.viewer ? [{ uri: VIEWER_URI, name: 'viewer', title: 'rig-worker 3D viewer', description: 'Interactive 3D viewer for the view tool (MCP Apps)', mimeType: VIEWER_MIME }] : [] });
