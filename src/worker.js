@@ -8,10 +8,9 @@
 // Public demo (env.DEMO = "1"): no token; each client IP gets its own file space, calls are rate limited and capped
 // (see DEMO_LIMITS in mcp.js), import_url and POST /bind are off, and the bucket deletes files after a day.
 import { rebind, readGLB } from './glb.js';
-import { handleMcp, sign, listFiles, roomFor } from './mcp.js';
+import { handleMcp, sign, listFiles, roomFor, resolve } from './mcp.js';
 import VIEWER from './viewer.html';
 
-const NAME_RE = /^[A-Za-z0-9._-]{1,120}$/;
 const DL_RE = /^(?:([0-9a-f]{16})\/)?([A-Za-z0-9._-]{1,120})$/;
 const MAX_UPLOAD = 64 * 1024 * 1024, DEMO_MAX_UPLOAD = 8 * 1024 * 1024;
 const HEAVY = new Set(['model', 'bind']); // the calls that can take seconds of CPU
@@ -120,8 +119,9 @@ async function route(req, env, url, path, cx) {
   }
   if (path === '/files' && req.method === 'GET') return Response.json(await listFiles(env, cx));
   if (path.startsWith('/files/')) {
-    const name = path.slice(7), k = `files/${cx.ns}${name}`;
-    if (!NAME_RE.test(name)) return new Response('bad name\n', { status: 400 });
+    const name = decodeURIComponent(path.slice(7));
+    let r; try { r = resolve(cx, name); } catch { return new Response('bad name\n', { status: 400 }); }
+    const k = r.k;
     if (req.method === 'PUT') {
       const max = cx.demo ? DEMO_MAX_UPLOAD : MAX_UPLOAD;
       if (+(req.headers.get('content-length') ?? 0) > max) return new Response(`too big (max ${max >> 20} MB)\n`, { status: 413 });
@@ -130,7 +130,7 @@ async function route(req, env, url, path, cx) {
       try { await readGLB(buf); } catch (e) { return new Response(`not a GLB: ${e.message}\n`, { status: 400 }); }
       try { await roomFor(env, cx, name); } catch (e) { return new Response(`${e.message}\n`, { status: 409 }); }
       await env.FILES.put(k, buf, { httpMetadata: { contentType: 'model/gltf-binary' } });
-      return Response.json({ saved: name, bytes: buf.length });
+      return Response.json({ saved: cx.demo ? r.full : name, bytes: buf.length });
     }
     if (req.method === 'GET') {
       const o = await env.FILES.get(k);
