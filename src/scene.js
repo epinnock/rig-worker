@@ -33,7 +33,50 @@ export function eulerDeg(x, y, z) {
   return qmul(qz, qmul(qy, qx));
 }
 
-function slerp(a, b, t) {
+export const qconj = (q) => [-q[0], -q[1], -q[2], q[3]];
+export function qrot(q, v) { // rotate vector v by unit quaternion q
+  const [x, y, z, w] = q, [a, b, c] = v;
+  const tx = 2 * (y * c - z * b), ty = 2 * (z * a - x * c), tz = 2 * (x * b - y * a);
+  return [a + w * tx + y * tz - z * ty, b + w * ty + z * tx - x * tz, c + w * tz + x * ty - y * tx];
+}
+// rotation part of a column-major 4x4 (columns normalised, so a uniform scale is ignored) as a unit quaternion
+export function matQuat(m) {
+  const n = (i) => Math.hypot(m[i], m[i + 1], m[i + 2]) || 1, sx = n(0), sy = n(4), sz = n(8);
+  const a = m[0] / sx, b = m[4] / sy, c = m[8] / sz, d = m[1] / sx, e = m[5] / sy, f = m[9] / sz, g = m[2] / sx, h = m[6] / sy, i = m[10] / sz;
+  const tr = a + e + i; let q;
+  if (tr > 0) { const S = Math.sqrt(tr + 1) * 2; q = [(h - f) / S, (c - g) / S, (d - b) / S, S / 4]; }
+  else if (a > e && a > i) { const S = Math.sqrt(1 + a - e - i) * 2; q = [S / 4, (b + d) / S, (c + g) / S, (h - f) / S]; }
+  else if (e > i) { const S = Math.sqrt(1 + e - a - i) * 2; q = [(b + d) / S, S / 4, (f + h) / S, (c - g) / S]; }
+  else { const S = Math.sqrt(1 + i - a - e) * 2; q = [(c + g) / S, (f + h) / S, S / 4, (d - b) / S]; }
+  const l = Math.hypot(...q); return q.map((v) => v / l);
+}
+// World rest orientation for a bone made by bind: local +Y runs head -> tail (what Blender, Maya and most tools expect,
+// so bones import pointing along the limb), local X stays as close to world +X as it can (world +Z for bones along X).
+export function boneFrame(head, tail) {
+  const d = [tail[0] - head[0], tail[1] - head[1], tail[2] - head[2]], L = Math.hypot(...d);
+  if (L < 1e-9) return [0, 0, 0, 1];
+  const y = d.map((v) => v / L), ref = Math.abs(y[0]) > 0.9 ? [0, 0, 1] : [1, 0, 0];
+  const k = ref[0] * y[0] + ref[1] * y[1] + ref[2] * y[2];
+  let x = [ref[0] - k * y[0], ref[1] - k * y[1], ref[2] - k * y[2]]; const lx = Math.hypot(...x); x = x.map((v) => v / lx);
+  const z = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
+  return matQuat([x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, 0, 0, 0, 1]);
+}
+// Joints made by bind are marked extras.axes = "world": the tools' rotations and moves on them are about the world
+// X/Y/Z axes as they stand at rest (the joint's own oriented axes are hidden from the API). Other joints (rigs made in
+// Blender etc.) take rotations about their own rest axes and moves in their parent's axes, as before.
+const worldAxes = (n) => n.getExtras?.()?.axes === 'world';
+export function jointRot(n, e) {
+  if (!worldAxes(n)) return e;
+  const R = matQuat(n.getWorldMatrix());
+  return qmul(qconj(R), qmul(e, R));
+}
+export function jointMove(n, m) {
+  if (!worldAxes(n)) return m;
+  const p = n.getParentNode();
+  return p ? qrot(qconj(matQuat(p.getWorldMatrix())), m) : m;
+}
+
+export function slerp(a, b, t) {
   let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
   const s = d < 0 ? -1 : 1; d *= s;
   if (d > 0.9995) {
