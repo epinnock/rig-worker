@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rig-worker viewer</title>
+<!--
+  rig-worker viewer: one page, three homes.
+    1. MCP Apps: served as ui://rig-worker/viewer.html for the `view` tool, so hosts that support MCP Apps (Claude and
+       others) show it inline; it reads the signed GLB link from the tool result.
+    2. The Worker: GET /view/<file>?exp&sig (the link the view and export tools return) loads /dl/<file>?exp&sig.
+    3. Anywhere else (the docs site): ?src=<url of a .glb>, or drop a .glb on the page. Dropped files never leave the browser.
+  three.js comes from cdn.jsdelivr.net, pinned.
+-->
+<style>
+:root {
+  --bg: #f7f2e7; --panel: #fffdf8; --ink: #1d1f26; --ink2: #4a4f5c; --ink3: #7a7f8c; --line: #e2d8c4;
+  --chip: #efe7d6; --accent: #b0571f; --accent-ink: #fff; --stage: #e9e2d3; --stage2: #d9d0bd; --hud: rgb(29 31 38 / .72);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #13151b; --panel: #1c1f28; --ink: #ece7dc; --ink2: #b3b0a8; --ink3: #82808a; --line: #2b2f3a;
+    --chip: #252934; --accent: #f2b134; --accent-ink: #1d1f26; --stage: #2a2e39; --stage2: #1c1f27; --hud: rgb(10 11 15 / .7);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #13151b; --panel: #1c1f28; --ink: #ece7dc; --ink2: #b3b0a8; --ink3: #82808a; --line: #2b2f3a;
+  --chip: #252934; --accent: #f2b134; --accent-ink: #1d1f26; --stage: #2a2e39; --stage2: #1c1f27; --hud: rgb(10 11 15 / .7);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+button, select, input { font: inherit; color: inherit; }
+#app { display: grid; grid-template-columns: 1fr 292px; height: 100vh; min-height: 420px; }
+body.embedded #app { height: 560px; min-height: 0; }
+@media (max-width: 900px) { #app { grid-template-columns: 1fr 250px; } #panel { padding: 4px 11px 11px; } }
+#stage { position: relative; min-width: 0; background: radial-gradient(ellipse at 50% 38%, var(--stage), var(--stage2)); overflow: hidden; }
+#stage canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+#title { position: absolute; top: 10px; left: 12px; right: 120px; font-weight: 650; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+#title small { font-weight: 450; color: var(--ink3); margin-left: 6px; }
+#hud { position: absolute; left: 10px; bottom: 10px; background: var(--hud); color: #f4efe4; border-radius: 7px; padding: 3px 8px; font: 12px ui-monospace, "SF Mono", Menlo, monospace; pointer-events: none; }
+#corner { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
+#corner button { background: var(--hud); color: #f4efe4; border: 0; border-radius: 7px; width: 30px; height: 28px; cursor: pointer; font-size: 14px; }
+#corner button:hover { filter: brightness(1.25); }
+#msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--ink2); font-size: 14px; }
+#msg[hidden] { display: none; }
+#msg .spin { width: 22px; height: 22px; border: 2.5px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 0 auto 10px; animation: r .8s linear infinite; }
+@keyframes r { to { transform: rotate(360deg); } }
+#drop { position: absolute; inset: 8px; border: 2px dashed var(--accent); border-radius: 12px; display: none; place-items: center; font-weight: 600; background: color-mix(in srgb, var(--bg) 70%, transparent); }
+body.dragging #drop { display: grid; }
+#panel { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 6px 14px 14px; }
+section { padding: 10px 0; border-bottom: 1px solid var(--line); }
+section:last-child { border-bottom: 0; }
+h2 { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink3); margin: 0 0 8px; font-weight: 650; }
+.row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.row > label { color: var(--ink2); min-width: 44px; }
+select { flex: 1; min-width: 0; background: var(--chip); border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; }
+input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button, .btn { background: var(--chip); border: 1px solid var(--line); border-radius: 7px; padding: 3px 9px; cursor: pointer; }
+.seg button:hover:not(:disabled), .btn:hover { border-color: var(--ink3); }
+.seg button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.seg button:disabled { opacity: .4; cursor: default; }
+.btn.play { width: 34px; padding: 3px 0; text-align: center; }
+.checks { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+.checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.checks input { accent-color: var(--accent); margin: 0; }
+.checks input:disabled + span { opacity: .45; }
+.num { font-variant-numeric: tabular-nums; color: var(--ink3); min-width: 74px; text-align: right; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+td { padding: 2px 0; vertical-align: top; }
+td:first-child { color: var(--ink2); padding-right: 8px; }
+td:last-child { text-align: right; }
+#clips td { cursor: pointer; }
+#clips tr.on td { color: var(--accent); font-weight: 600; }
+#legend { display: none; height: 8px; border-radius: 4px; margin: 6px 0 2px; background: linear-gradient(90deg, hsl(240 100% 50%), hsl(180 100% 50%), hsl(120 100% 50%), hsl(60 100% 50%), hsl(0 100% 50%)); }
+#legendTxt { display: none; justify-content: space-between; color: var(--ink3); font-size: 11px; }
+.keys { color: var(--ink3); font-size: 11.5px; line-height: 1.7; }
+kbd { font: 11px ui-monospace, Menlo, monospace; background: var(--chip); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+.open { display: flex; gap: 6px; align-items: center; }
+.open small { color: var(--ink3); }
+@media (max-width: 599px) {
+  #app, body.embedded #app { grid-template-columns: 1fr; grid-template-rows: minmax(320px, 58vh) auto; height: auto; }
+  body.embedded #app { grid-template-rows: 360px auto; }
+  #panel { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .keys { display: none; }
+}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body data-default="../assets/pip.glb">
+<div id="app">
+  <div id="stage">
+    <div id="title">rig-worker viewer</div>
+    <div id="corner">
+      <button id="fs" title="Full screen" aria-label="Full screen" hidden>⤢</button>
+      <button id="reset" title="Reset view (0)" aria-label="Reset view">⟲</button>
+    </div>
+    <div id="hud" hidden></div>
+    <div id="msg"><div><div class="spin"></div><span id="msgTxt">starting the viewer…</span></div></div>
+    <div id="drop">drop a .glb to open it</div>
+  </div>
+  <aside id="panel">
+    <section>
+      <h2>Animation</h2>
+      <div class="row"><select id="clip" aria-label="Clip"></select></div>
+      <div class="row">
+        <button class="btn play" id="play" title="Play / pause (space)" aria-label="Play or pause">⏸</button>
+        <input type="range" id="scrub" min="0" max="1" step="0.001" value="0" aria-label="Time">
+        <span class="num" id="time">0.00 / 0.00</span>
+      </div>
+      <div class="row"><label for="speed">Speed</label><input type="range" id="speed" min="0.1" max="2" step="0.05" value="1"><span class="num" id="speedTxt">1.00×</span></div>
+    </section>
+    <section>
+      <h2>Shading</h2>
+      <div class="seg" id="modes">
+        <button data-id="lit" class="on" title="As authored, lit">Lit</button>
+        <button data-id="clay" title="Plain clay: shape only">Clay</button>
+        <button data-id="albedo" title="Base colour, unlit">Albedo</button>
+        <button data-id="normals" title="Normals">Normals</button>
+        <button data-id="weights" title="Skin weights">Weights</button>
+      </div>
+      <div class="row" id="boneRow" hidden><label for="bone">Bone</label><select id="bone"></select></div>
+      <div id="legend"></div><div id="legendTxt"><span>0</span><span>weight</span><span>1</span></div>
+    </section>
+    <section>
+      <h2>Show</h2>
+      <div class="checks">
+        <label><input type="checkbox" id="skel"><span>Skeleton</span></label>
+        <label><input type="checkbox" id="wire"><span>Wireframe</span></label>
+        <label><input type="checkbox" id="bbox"><span>Bounds</span></label>
+        <label><input type="checkbox" id="floor" checked><span>Floor</span></label>
+      </div>
+    </section>
+    <section>
+      <h2>View</h2>
+      <div class="seg" id="views">
+        <button data-id="front">Front</button><button data-id="three" class="on">¾</button><button data-id="side">Side</button>
+        <button data-id="back">Back</button><button data-id="top">Top</button>
+      </div>
+      <div class="row checks" style="grid-template-columns:1fr"><label><input type="checkbox" id="spin"><span>Turntable</span></label></div>
+    </section>
+    <section>
+      <h2>Model</h2>
+      <table id="info"></table>
+    </section>
+    <section id="clipsSec" hidden>
+      <h2>Clips</h2>
+      <table id="clips"></table>
+    </section>
+    <section>
+      <div class="open"><button class="btn" id="openBtn">Open a .glb…</button><small>or drop one here; it stays in this browser</small></div>
+      <input type="file" id="file" accept=".glb,model/gltf-binary" hidden>
+    </section>
+    <section class="keys">
+      <kbd>space</kbd> play · <kbd>[</kbd> <kbd>]</kbd> clip · <kbd>←</kbd> <kbd>→</kbd> step ·
+      <kbd>1</kbd>–<kbd>5</kbd> view · <kbd>m</kbd> shading · <kbd>s</kbd> skeleton · <kbd>w</kbd> wire · <kbd>t</kbd> turntable
+    </section>
+  </aside>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const $ = (id) => document.getElementById(id);
+const BIND = '__bind__';
+const stage = $('stage');
+
+// ---------- host: MCP Apps (postMessage JSON-RPC), the Worker's /view route, or ?src ----------
+const inFrame = window.parent !== window;
+let rpcId = 0;
+const pending = new Map();
+const post = (m) => window.parent.postMessage({ jsonrpc: '2.0', ...m }, '*');
+const hostRequest = (method, params) => new Promise((res, rej) => {
+  const id = ++rpcId; pending.set(id, { res, rej }); post({ id, method, params });
+  setTimeout(() => { if (pending.delete(id)) rej(new Error(`${method}: no answer`)); }, 8000);
+});
+let hostCaps = null;
+function applyHostContext(c) {
+  if (!c) return;
+  if (c.theme === 'dark' || c.theme === 'light') document.documentElement.dataset.theme = c.theme;
+  if (c.displayMode) document.body.dataset.mode = c.displayMode;
+  if (c.displayMode === 'fullscreen') document.body.classList.remove('embedded');
+  else if (mcp) document.body.classList.add('embedded');
+  sizeChanged();
+}
+function fromResult(r) { // a CallToolResult from the view (or export) tool
+  const s = r?.structuredContent ?? (() => { for (const c of r?.content ?? []) if (c.type === 'text') try { return JSON.parse(c.text); } catch {} })();
+  if (r?.isError || !s?.glb) { msg(r?.content?.find((c) => c.type === 'text')?.text ?? 'the tool returned no model link', true); return; }
+  loadUrl(s.glb, s.file ?? s.glb.split('?')[0].split('/').pop());
+}
+window.addEventListener('message', (e) => {
+  if (e.source !== window.parent) return;
+  const m = e.data;
+  if (!m || m.jsonrpc !== '2.0') return;
+  if (m.id != null && !m.method) { const p = pending.get(m.id); if (p) { pending.delete(m.id); m.error ? p.rej(new Error(m.error.message)) : p.res(m.result); } return; }
+  switch (m.method) {
+    case 'ui/notifications/tool-input': { const f = m.params?.arguments?.file; if (f && !model) { setTitle(f); msg(`loading ${f}…`); } break; }
+    case 'ui/notifications/tool-result': fromResult(m.params); break;
+    case 'ui/notifications/tool-cancelled': if (!model) msg('the tool call was cancelled', true); break;
+    case 'ui/notifications/host-context-changed': applyHostContext(m.params); break;
+    default: if (m.id != null) post(m.method === 'ui/resource-teardown' || m.method === 'ping' ? { id: m.id, result: {} } : { id: m.id, error: { code: -32601, message: 'not supported' } });
+  }
+});
+let mcp = false;
+let lastH = 0;
+function sizeChanged() {
+  if (!mcp) return;
+  const h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+  if (h !== lastH) { lastH = h; post({ method: 'ui/notifications/size-changed', params: { width: Math.ceil(document.documentElement.clientWidth), height: h } }); }
+}
+new ResizeObserver(sizeChanged).observe(document.body);
+
+async function start() {
+  const q = new URLSearchParams(location.search);
+  const viewPath = location.pathname.match(/\/view\/(.+)$/);
+  if (q.get('src')) return loadUrl(q.get('src'), q.get('src').split('?')[0].split('/').pop());
+  if (viewPath && q.get('sig')) return loadUrl(`${location.origin}/dl/${viewPath[1]}${location.search}`, decodeURIComponent(viewPath[1].split('/').pop()));
+  if (inFrame) {
+    try {
+      const r = await hostRequest('ui/initialize', { protocolVersion: '2026-01-26', appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] }, capabilities: {}, clientInfo: { name: 'rig-worker viewer', version: '0.5.0' } });
+      mcp = true; hostCaps = r?.hostCapabilities ?? {};
+      document.body.classList.add('embedded');
+      const modes = r?.hostContext?.availableDisplayModes ?? hostCaps.availableDisplayModes;
+      if (!modes || modes.includes?.('fullscreen')) $('fs').hidden = false;
+      applyHostContext(r?.hostContext);
+      post({ method: 'ui/notifications/initialized', params: {} });
+      msg('waiting for the model…');
+      return;
+    } catch { /* not an MCP host: fall through */ }
+  }
+  if (document.body.dataset.default) return loadUrl(document.body.dataset.default, document.body.dataset.default.split('/').pop());
+  msg('open a .glb (button on the right) or drop one here', true);
+}
+
+// ---------- three.js scene ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stage.prepend(renderer.domElement);
+renderer.domElement.tabIndex = 0;
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.55;
+const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.09; controls.autoRotateSpeed = 2.2;
+
+scene.add(new THREE.HemisphereLight(0xfff6e8, 0x5a5048, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 2.1);
+sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
+scene.add(sun, sun.target);
+const floor = new THREE.Group();
+const catcher = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.22 }));
+catcher.rotation.x = -Math.PI / 2; catcher.receiveShadow = true;
+floor.add(catcher);
+scene.add(floor);
+let grid = null;
+// joint dots drawn over the mesh with the skeleton lines
+const joints = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ color: 0xffffff, size: 7, sizeAttenuation: false, depthTest: false, depthWrite: false, transparent: true }));
+joints.renderOrder = 11; joints.frustumCulled = false; joints.visible = false;
+scene.add(joints);
+const tmpV = new THREE.Vector3();
+function updateJoints() {
+  joints.visible = !!skelHelper?.visible && bones.length > 0;
+  if (!joints.visible) return;
+  let a = joints.geometry.attributes.position;
+  if (!a || a.count !== bones.length) { a = new THREE.BufferAttribute(new Float32Array(bones.length * 3), 3); joints.geometry.setAttribute('position', a); }
+  bones.forEach((b, i) => { b.getWorldPosition(tmpV); a.setXYZ(i, tmpV.x, tmpV.y, tmpV.z); });
+  a.needsUpdate = true;
+}
+
+const clay = new THREE.MeshStandardMaterial({ color: 0xcfc8bd, roughness: 0.85 });
+const normalsMat = new THREE.MeshNormalMaterial();
+const weightsMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+const wireMat = new THREE.MeshBasicMaterial({ color: 0x10131a, wireframe: true, transparent: true, opacity: 0.28 });
+for (const m of [clay, normalsMat, weightsMat]) { m.polygonOffset = true; m.polygonOffsetFactor = 1; m.polygonOffsetUnits = 1; }
+const albedoCache = new Map();
+const albedoOf = (src) => {
+  let m = albedoCache.get(src);
+  if (!m) { m = new THREE.MeshBasicMaterial({ map: src.map ?? null, color: src.color ?? 0xffffff, vertexColors: src.vertexColors, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }); albedoCache.set(src, m); }
+  return m;
+};
+
+let model = null, mixer = null, action = null, clips = [], skinned = [], skelHelper = null, boxHelper = null, wires = [], bones = [];
+let size = new THREE.Vector3(1, 1, 1), radius = 1, playing = true, speed = 1, mode = 'lit', view = 'three';
+const meshesOf = (o) => { const out = []; o.traverse((c) => { if (c.isMesh && c.visible && !wires.includes(c)) out.push(c); }); return out; };
+
+function msg(text, still = false) {
+  const m = $('msg');
+  m.hidden = !text;
+  if (text) { m.querySelector('.spin').style.display = still ? 'none' : ''; $('msgTxt').textContent = text; }
+}
+function setTitle(name, extra = '') { $('title').innerHTML = ''; $('title').append(name); if (extra) { const s = document.createElement('small'); s.textContent = extra; $('title').append(s); } document.title = `${name} · rig-worker viewer`; }
+
+async function loadUrl(url, name) {
+  setTitle(name); msg(`loading ${name}…`);
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(r.status === 403 ? 'this link has expired; ask for a new one (view or export tool)' : `download failed (${r.status})`);
+    await loadBuffer(await r.arrayBuffer(), name);
+  } catch (e) { msg(`${e.message}`, true); }
+}
+async function loadBuffer(buf, name) {
+  msg(`opening ${name}…`);
+  const gltf = await new GLTFLoader().parseAsync(buf, '');
+  dispose();
+  const root = gltf.scene;
+  let hidden = 0;
+  root.traverse((o) => {
+    if (/^Icosphere/.test(o.name) && o.isMesh) { o.visible = false; hidden++; } // Blender bone-shape helpers
+    if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.userData.orig = o.material; o.frustumCulled = false; }
+    if (o.isSkinnedMesh) skinned.push(o);
+  });
+  // stand it on the floor, centred
+  root.updateMatrixWorld(true);
+  const b0 = new THREE.Box3().setFromObject(root, true), c0 = b0.getCenter(new THREE.Vector3());
+  root.position.set(-c0.x, -b0.min.y, -c0.z);
+  root.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(root, true);
+  size = bb.getSize(new THREE.Vector3());
+  radius = Math.max(0.05, bb.getBoundingSphere(new THREE.Sphere()).radius);
+  scene.add(root); model = root;
+
+  boxHelper = new THREE.Box3Helper(bb, new THREE.Color(0xf2a65a)); boxHelper.visible = $('bbox').checked; scene.add(boxHelper);
+  const ext = Math.max(size.x, size.z, size.y) * 3;
+  catcher.scale.set(ext * 2, ext * 2, 1);
+  if (grid) { floor.remove(grid); grid.geometry.dispose(); }
+  const cell = niceCell(Math.max(size.x, size.y, size.z) / 8), cells = Math.ceil(ext / cell) * 2;
+  grid = new THREE.GridHelper(cells * cell, cells, 0x8a8170, 0x8a8170);
+  grid.material.transparent = true; grid.material.opacity = 0.22; grid.material.depthWrite = false; grid.position.y = 0.0005;
+  floor.add(grid); floor.userData.cell = cell;
+  sun.position.set(radius * 2.2, radius * 4, radius * 2.6); sun.target.position.set(0, size.y * 0.4, 0);
+  const sc = sun.shadow.camera; sc.left = sc.bottom = -radius * 2; sc.right = sc.top = radius * 2; sc.near = 0.01; sc.far = radius * 12; sc.updateProjectionMatrix();
+  camera.near = radius / 100; camera.far = radius * 60; camera.updateProjectionMatrix();
+
+  bones = [];
+  if (skinned.length) {
+    skelHelper = new THREE.SkeletonHelper(root);
+    { const col = skelHelper.geometry.attributes.color, a = new THREE.Color(0x19d3ff), b = new THREE.Color(0xffd23f); // parent end cyan, child end gold
+      for (let i = 0; i < col.count; i++) { const c = i % 2 ? b : a; col.setXYZ(i, c.r, c.g, c.b); } col.needsUpdate = true; }
+    skelHelper.material.depthTest = false; skelHelper.material.depthWrite = false; skelHelper.material.transparent = true;
+    skelHelper.renderOrder = 10; skelHelper.visible = $('skel').checked; scene.add(skelHelper);
+    const seen = new Set();
+    for (const s of skinned) for (const bn of s.skeleton.bones) if (!seen.has(bn)) { seen.add(bn); bones.push(bn); }
+    // three.js strips dots from node names (UpperArm.L -> UpperArm_L): label bones with the file's own names
+    joints.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+    const nodes = gltf.parser?.json?.nodes ?? [];
+    for (const bn of bones) bn.userData.label = nodes[gltf.parser.associations.get(bn)?.nodes]?.name ?? bn.name;
+  }
+  for (const id of ['skel']) $(id).disabled = !skinned.length;
+  document.querySelector('#modes [data-id="weights"]').disabled = !skinned.length;
+  if (!skinned.length && mode === 'weights') mode = 'lit';
+  fillBones();
+
+  clips = gltf.animations;
+  if (clips.length) mixer = new THREE.AnimationMixer(root);
+  const sel = $('clip'); sel.innerHTML = '';
+  const add = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.append(o); };
+  if (!clips.length) { add('', 'no clips'); sel.disabled = true; }
+  else { sel.disabled = false; add(BIND, 'bind pose'); for (const c of clips) add(c.name, `${c.name}  ·  ${c.duration.toFixed(2)} s`); sel.value = clips[0].name; }
+  playClip(sel.value);
+  setMode(mode);
+  wireUp($('wire').checked);
+  fillInfo(buf.byteLength, gltf, hidden);
+  setTitle(name, `${fmtM(size.y)} tall${bones.length ? ` · ${bones.length} bones` : ''}${clips.length ? ` · ${clips.length} clip${clips.length > 1 ? 's' : ''}` : ''}`);
+  setView(view);
+  msg('');
+  window.__viewer = { ready: true, name, clips: clips.map((c) => c.name), bones: bones.length };
+}
+const niceCell = (x) => { const p = 10 ** Math.floor(Math.log10(x)), f = x / p; return (f < 2 ? 1 : f < 5 ? 2 : 5) * p; };
+const fmtM = (m) => m >= 1 ? `${m.toFixed(2)} m` : m >= 0.01 ? `${(m * 100).toFixed(1)} cm` : `${(m * 1000).toFixed(1)} mm`;
+const fmtB = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(2)} MB` : `${Math.round(n / 1024)} KB`;
+
+function dispose() {
+  for (const w of wires) w.parent?.remove(w);
+  wires = [];
+  for (const h of [skelHelper, boxHelper]) if (h) { scene.remove(h); h.dispose?.(); }
+  skelHelper = boxHelper = null;
+  mixer?.stopAllAction(); mixer = null; action = null; clips = []; skinned = [];
+  if (model) {
+    scene.remove(model);
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      o.geometry.dispose();
+      for (const m of [o.userData.orig].flat()) { if (!m) continue; for (const v of Object.values(m)) if (v?.isTexture) v.dispose(); m.dispose(); }
+    });
+    model = null;
+  }
+  for (const m of albedoCache.values()) m.dispose();
+  albedoCache.clear();
+}
+
+// ---------- animation ----------
+function playClip(name) {
+  if (!mixer) { $('scrub').disabled = true; updateTime(); return; }
+  mixer.stopAllAction(); action = null;
+  if (name === BIND) { for (const s of skinned) s.skeleton.pose(); }
+  else {
+    const c = clips.find((x) => x.name === name);
+    if (c) { action = mixer.clipAction(c); action.reset().play(); action.paused = !playing; mixer.update(0); }
+  }
+  $('scrub').disabled = !action; $('scrub').max = String(action?.getClip().duration ?? 1);
+  for (const tr of $('clips').querySelectorAll('tr')) tr.classList.toggle('on', tr.dataset.name === name);
+  if (mode === 'weights') paintWeights();
+  updateTime();
+}
+function setPlaying(p) { playing = p; if (action) action.paused = !p; $('play').textContent = p ? '⏸' : '▶'; }
+function stepFrames(n) {
+  if (!action) return;
+  setPlaying(false);
+  const d = action.getClip().duration;
+  action.time = ((action.time + n / 30) % d + d) % d; mixer.update(0); updateTime();
+}
+function updateTime() {
+  const d = action?.getClip().duration ?? 0, t = action?.time ?? 0;
+  $('time').textContent = `${t.toFixed(2)} / ${d.toFixed(2)}`;
+  if (document.activeElement !== $('scrub')) $('scrub').value = String(t);
+  const h = $('hud');
+  h.hidden = !model;
+  h.textContent = action ? `${action.getClip().name}  ${t.toFixed(2)} s  ·  frame ${Math.round(t * 30)}` : clips.length ? 'bind pose' : 'no clips';
+}
+
+// ---------- shading ----------
+function setMode(m) {
+  mode = m;
+  for (const b of $('modes').querySelectorAll('button')) b.classList.toggle('on', b.dataset.id === m);
+  $('boneRow').hidden = m !== 'weights';
+  const showLegend = m === 'weights' && +$('bone').value >= 0;
+  $('legend').style.display = showLegend ? 'block' : 'none'; $('legendTxt').style.display = showLegend ? 'flex' : 'none';
+  if (!model) return;
+  for (const mesh of meshesOf(model)) {
+    const src = mesh.userData.orig, map = (f) => Array.isArray(src) ? src.map(f) : f(src);
+    const g = mesh.geometry;
+    if (g.userData.color0 !== undefined) { // the file's own vertex colours back (or none)
+      if (g.userData.color0) g.setAttribute('color', g.userData.color0); else g.deleteAttribute('color');
+    }
+    switch (m) {
+      case 'lit': mesh.material = src; break;
+      case 'clay': mesh.material = clay; break;
+      case 'albedo': mesh.material = map(albedoOf); break;
+      case 'normals': mesh.material = normalsMat; break;
+      case 'weights': mesh.material = mesh.isSkinnedMesh ? weightsMat : clay; break;
+    }
+  }
+  if (m === 'weights') paintWeights();
+}
+const palette = (i) => new THREE.Color().setHSL((i * 0.618034) % 1, 0.62, 0.55);
+function fillBones() {
+  const sel = $('bone'); sel.innerHTML = '';
+  const o = document.createElement('option'); o.value = '-1'; o.textContent = 'regions (strongest bone)'; sel.append(o);
+  bones.forEach((bn, i) => { const p = document.createElement('option'); p.value = String(i); p.textContent = bn.userData.label || `bone ${i}`; sel.append(p); });
+  sel.value = '-1';
+}
+function paintWeights() {
+  const pick = +$('bone').value, target = pick >= 0 ? bones[pick] : null, c = new THREE.Color();
+  for (const s of skinned) {
+    const g = s.geometry, n = g.attributes.position.count, idx = g.attributes.skinIndex, wt = g.attributes.skinWeight;
+    if (!idx || !wt) continue;
+    if (g.userData.color0 === undefined) g.userData.color0 = g.attributes.color ?? null;
+    let col = g.userData.weightColor;
+    if (!col) { col = g.userData.weightColor = new THREE.BufferAttribute(new Float32Array(n * 3), 3); }
+    const local = s.skeleton.bones;
+    for (let v = 0; v < n; v++) {
+      if (!target) {
+        let best = 0, bw = -1;
+        for (let k = 0; k < 4; k++) { const w = wt.getComponent(v, k); if (w > bw) { bw = w; best = idx.getComponent(v, k); } }
+        c.copy(palette(bones.indexOf(local[best]))).multiplyScalar(0.45 + 0.55 * Math.min(1, bw * 1.2));
+      } else {
+        let w = 0;
+        for (let k = 0; k < 4; k++) if (local[idx.getComponent(v, k)] === target) w += wt.getComponent(v, k);
+        c.setHSL((1 - Math.min(1, w)) * 0.66, 1, w < 0.002 ? 0.14 : 0.5);
+      }
+      col.setXYZ(v, c.r, c.g, c.b);
+    }
+    col.needsUpdate = true;
+    g.setAttribute('color', col);
+  }
+}
+function wireUp(on) {
+  for (const w of wires) w.parent?.remove(w);
+  wires = [];
+  if (!on || !model) return;
+  for (const mesh of meshesOf(model)) {
+    const w = mesh.isSkinnedMesh ? new THREE.SkinnedMesh(mesh.geometry, wireMat) : new THREE.Mesh(mesh.geometry, wireMat);
+    mesh.matrix.decompose(w.position, w.quaternion, w.scale);
+    w.frustumCulled = false; w.renderOrder = 2;
+    mesh.parent.add(w);
+    if (mesh.isSkinnedMesh) w.bind(mesh.skeleton, mesh.bindMatrix);
+    wires.push(w);
+  }
+}
+
+// ---------- views ----------
+const VIEWS = { front: [0, 0.12, 1], three: [0.72, 0.28, 0.9], side: [1, 0.12, 0], back: [0, 0.12, -1], top: [0, 1, 0.0001] };
+function setView(v) {
+  view = v;
+  for (const b of $('views').querySelectorAll('button')) b.classList.toggle('on', b.dataset.id === v);
+  const target = new THREE.Vector3(0, size.y * 0.5, 0);
+  const d = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.08;
+  const dir = new THREE.Vector3(...VIEWS[v]).normalize();
+  camera.position.copy(target).addScaledVector(dir, d);
+  controls.target.copy(target); controls.minDistance = radius * 0.2; controls.maxDistance = radius * 20;
+  controls.update();
+}
+
+// ---------- numbers ----------
+function fillInfo(bytes, gltf, hidden) {
+  let tris = 0, verts = 0, meshes = 0;
+  const mats = new Set(), texs = new Set();
+  for (const m of meshesOf(model)) {
+    meshes++; verts += m.geometry.attributes.position.count;
+    tris += (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3;
+    for (const mat of [m.userData.orig].flat()) { mats.add(mat); for (const v of Object.values(mat)) if (v?.isTexture) texs.add(v); }
+  }
+  let texBytes = 0;
+  for (const t of texs) { const im = t.image; if (im?.width) texBytes += im.width * im.height * 4 * 1.33; }
+  const colours = meshesOf(model).some((m) => m.geometry.attributes.color && m.geometry.userData.weightColor !== m.geometry.attributes.color);
+  const rows = [
+    ['File', fmtB(bytes)], ['Triangles', Math.round(tris).toLocaleString()], ['Vertices', verts.toLocaleString()],
+    ['Meshes', meshes + (hidden ? ` (+${hidden} hidden)` : '')], ['Materials', mats.size],
+    ['Textures', texs.size ? `${texs.size} · ${fmtB(texBytes)} GPU` : colours ? 'none · vertex colours' : 'none'],
+    ['Bones', bones.length || '—'], ['Size', `${fmtM(size.x)} × ${fmtM(size.y)} × ${fmtM(size.z)}`],
+    ['Grid', fmtM(floor.userData.cell ?? 0.1)],
+  ];
+  const ex = gltf.parser?.json?.asset?.generator; if (ex) rows.push(['Made by', ex]);
+  $('info').innerHTML = '';
+  for (const [k, v] of rows) { const tr = $('info').insertRow(); tr.insertCell().textContent = k; tr.insertCell().textContent = String(v); }
+  $('clipsSec').hidden = !clips.length;
+  $('clips').innerHTML = '';
+  for (const c of clips) {
+    const tr = $('clips').insertRow(); tr.dataset.name = c.name;
+    tr.insertCell().textContent = c.name; tr.insertCell().textContent = `${c.duration.toFixed(2)} s · ${c.tracks.length} tracks`;
+    tr.onclick = () => { $('clip').value = c.name; playClip(c.name); };
+  }
+  for (const tr of $('clips').querySelectorAll('tr')) tr.classList.toggle('on', tr.dataset.name === $('clip').value);
+}
+
+// ---------- controls ----------
+$('clip').onchange = (e) => playClip(e.target.value);
+$('play').onclick = () => setPlaying(!playing);
+$('scrub').oninput = (e) => { if (!action) return; setPlaying(false); action.time = +e.target.value; mixer.update(0); updateTime(); };
+$('speed').oninput = (e) => { speed = +e.target.value; $('speedTxt').textContent = `${speed.toFixed(2)}×`; };
+$('modes').onclick = (e) => { const b = e.target.closest('button'); if (b && !b.disabled) setMode(b.dataset.id); };
+$('bone').onchange = () => setMode('weights');
+$('views').onclick = (e) => { const b = e.target.closest('button'); if (b) setView(b.dataset.id); };
+$('skel').onchange = (e) => { if (skelHelper) skelHelper.visible = e.target.checked; };
+$('wire').onchange = (e) => wireUp(e.target.checked);
+$('bbox').onchange = (e) => { if (boxHelper) boxHelper.visible = e.target.checked; };
+$('floor').onchange = (e) => { floor.visible = e.target.checked; };
+$('spin').onchange = (e) => { controls.autoRotate = e.target.checked; };
+$('reset').onclick = () => setView(view);
+$('fs').onclick = async () => {
+  const want = document.body.dataset.mode === 'fullscreen' ? 'inline' : 'fullscreen';
+  try { const r = await hostRequest('ui/request-display-mode', { mode: want }); applyHostContext({ displayMode: r?.mode ?? want }); } catch {}
+};
+$('openBtn').onclick = () => $('file').click();
+$('file').onchange = async (e) => { const f = e.target.files[0]; if (f) openFile(f); e.target.value = ''; };
+async function openFile(f) {
+  try { await loadBuffer(await f.arrayBuffer(), f.name); } catch (err) { msg(`could not open ${f.name}: ${err.message}`, true); }
+}
+let dragDepth = 0;
+addEventListener('dragenter', (e) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth++; document.body.classList.add('dragging'); e.preventDefault(); } });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+addEventListener('dragover', (e) => e.preventDefault());
+addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); const f = e.dataTransfer?.files?.[0]; if (f) openFile(f); });
+const click = (id) => $(id).click();
+addEventListener('keydown', (e) => {
+  if (e.target.closest?.('select, input[type=range]') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  if (k === ' ') { e.preventDefault(); setPlaying(!playing); }
+  else if (k === '[' || k === ']') {
+    const sel = $('clip'), n = sel.options.length; if (!n || sel.disabled) return;
+    sel.selectedIndex = (sel.selectedIndex + (k === ']' ? 1 : n - 1)) % n; playClip(sel.value);
+  } else if (k === 'ArrowLeft' || k === 'ArrowRight') { e.preventDefault(); stepFrames(k === 'ArrowRight' ? 1 : -1); }
+  else if (k >= '1' && k <= '5') setView(Object.keys(VIEWS)[+k - 1]);
+  else if (k === '0') setView(view);
+  else if (k === 'm') { const ids = [...$('modes').querySelectorAll('button:not(:disabled)')].map((b) => b.dataset.id); setMode(ids[(ids.indexOf(mode) + 1) % ids.length]); }
+  else if (k === 's') click('skel'); else if (k === 'w') click('wire'); else if (k === 't') click('spin'); else if (k === 'b') click('bbox');
+});
+
+// ---------- loop ----------
+const clock = new THREE.Clock();
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if (mixer && action && playing) { mixer.update(dt * speed); updateTime(); }
+  controls.update();
+  updateJoints();
+  renderer.render(scene, camera);
+});
+resize();
+start();
+</script>
+</body>
+</html>

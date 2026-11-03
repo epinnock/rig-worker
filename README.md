@@ -5,9 +5,12 @@
 <p align="center"><b>Headless 3D modelling and rigging for AI agents, as an MCP server in one Cloudflare Worker.</b><br>
 <a href="https://epinnock.github.io/rig-worker/">Docs and live playground</a> ·
 <a href="#use-the-public-demo">Public demo MCP</a> ·
+<a href="#see-it-in-3d">3D viewer</a> ·
 <a href="#self-host">Self-host</a></p>
 
 An agent describes a character as simple shapes and gets back one closed, vertex-coloured mesh. It then places bones, binds them with automatic (bone-heat) weights, keys an animation, and checks every step with rendered pictures and numbers. Everything runs as plain JavaScript inside a Worker: no Blender, no GPU, nothing to install.
+
+**Blender compatible.** Every GLB it writes opens in Blender 4.5 with the default glTF import settings and no clean-up: same mesh, vertex colours, bones, weights and clips, and Blender's re-export reads back the same. A round-trip test in the repo checks this ([details](#blender)).
 
 <p align="center"><img src="docs/img/walk_side.png" width="640" alt="Eight frames of Pip's walk cycle"></p>
 
@@ -20,8 +23,15 @@ An agent describes a character as simple shapes and gets back one closed, vertex
 | Rig | `bind`, `get_skeleton`, `paint_weights` | Bone heat (Baran & Popović 2007, the method behind Blender's *Automatic Weights*) solved on a closed voxel proxy, so broken or many-piece meshes still bind. Local weight fixes by sphere or box. |
 | Animate | `animate`, `qa` | Keyframed clips in Euler degrees; QA reports floor sinking, stretched or squashed edges, and hotspots with a ready-made repair region. |
 | Files | `list_files`, `delete_file`, `import_url`, `export` | GLBs in R2; signed download links. |
+| Show | `view` | An interactive 3D viewer for the user: inline in Claude and other MCP Apps hosts, or a signed link for any browser. |
 
 On a test creature mesh, the dominant bone of 97.6% of vertices matches Blender 4.5's Automatic Weights with the same skeleton. In one test an agent (Claude Opus 5.5) modelled a 44-shape toy character, rigged it with 19 bones and made it walk. It took 14 minutes and cost $2.59 in API calls plus about a cent of Worker CPU.
+
+## See it in 3D
+
+Ask the agent to show you a model and it calls `view`. In Claude, and other hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview), the viewer opens inside the chat; elsewhere the tool returns a signed `/view/<file>` link that opens the same viewer in a browser. You can orbit and zoom, play or scrub every clip or go to the bind pose, colour the mesh by skin weights (by region, or one bone as a heat map), and turn on the wireframe, skeleton and bounds. The panel lists triangles, bones, size and clips.
+
+[Try it with Pip](https://epinnock.github.io/rig-worker/viewer/), or drop in any .glb there (it stays in your browser). The viewer is one file, `src/viewer.html`, with three.js from jsDelivr; `npm run docs:viewer` copies it to `docs/viewer/`.
 
 ## Use the public demo
 
@@ -54,7 +64,7 @@ claude mcp add --transport http rig-worker https://rig-worker.<you>.workers.dev/
   --header "Authorization: Bearer <RIG_TOKEN>"
 ```
 
-Besides `POST /mcp` there is a plain HTTP API: `PUT/GET/DELETE /files/<name>`, `GET /files`, `GET /dl/<name>?exp&sig` and `POST /bind` (multipart). The public demo is the same code deployed with `npx wrangler deploy --env demo`; see `wrangler.jsonc`.
+Besides `POST /mcp` there is a plain HTTP API: `PUT/GET/DELETE /files/<name>`, `GET /files`, `GET /dl/<name>?exp&sig`, `GET /view/<name>?exp&sig` (the viewer) and `POST /bind` (multipart). The public demo is the same code deployed with `npx wrangler deploy --env demo`; see `wrangler.jsonc`.
 
 ## Develop
 
